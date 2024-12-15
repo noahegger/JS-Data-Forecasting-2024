@@ -1,0 +1,15 @@
+name: js_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12.4
+  - numpy=1.26.4
+  - matplotlib=3.8.0
+  - pandas=2.2.2
+  - scikit-learn=1.5.1
+  - polars=1.17.1
+  - pip
+  - kaggle
+  - ipykernel
+prefix: /Users/noahegger/miniconda3/envs/js_env
