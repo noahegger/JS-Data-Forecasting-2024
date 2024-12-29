@@ -13,4 +13,5 @@ dependencies:
   - kaggle
   - ipykernel
   - pyarrow 
+  - seaborn
 prefix: /Users/noahegger/miniconda3/envs/js_env

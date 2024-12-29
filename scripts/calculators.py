@@ -1,7 +1,19 @@
 from abc import ABC, abstractmethod
 
-import pandas as pd
+import numpy as np
 from sklearn.linear_model import Lasso, LinearRegression, Ridge
+
+
+def get_time_weights(n, halflife=0.35):
+    decay_factor = 0.5 ** (1 / (halflife * n))
+    weights = decay_factor ** np.arange(n)
+    weights /= weights.sum()
+    return weights
+
+
+def time_weighted_mean(vals, n, halflife=0.35):
+    weights = get_time_weights(n, halflife)
+    return np.dot(vals, weights[::-1])
 
 
 class LinearCalculator(ABC):
