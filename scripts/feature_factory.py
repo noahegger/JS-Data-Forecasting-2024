@@ -47,11 +47,37 @@ class ExpWeightedMeanCalculator(FeatureCalculator):
         return res
 
 
-class FeatureFactory:
-    def __init__(self, calculators):
-        self.calculators = calculators
+class OnlineMovingAverageCalculator(FeatureCalculator):
+    def __init__(self, window):
+        self.min_periods = window
+        self.window = window
 
-    def create_features(self, df):
+    def calculate(
+        self, df: pd.DataFrame, tdate: int, feature_column: str
+    ) -> pd.DataFrame:
+        df = df[df["date_id"] == tdate]
+        df[f"online_moving_average_{self.window}"] = (
+            df[feature_column]
+            .rolling(window=self.window, min_periods=self.min_periods)
+            .mean()
+        )
+        return df[f"online_moving_average_{self.window}"].iloc[-1]
+
+
+class FeatureFactory:
+    def __init__(
+        self,
+        calculators: list[FeatureCalculator],
+        alpha: float,
+    ):
+        self.calculators = calculators
+        self.alpha = alpha
+
+    def calculate(self, df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+        dfs = []
         for calculator in self.calculators:
-            df = calculator.calculate(df)
-        return df
+            df = calculator.calculate(df, *args, **kwargs)
+            dfs.append(df)
+
+        interpolated_df = dfs[0] * self.alpha + dfs[1] * (1 - self.alpha)
+        return interpolated_df

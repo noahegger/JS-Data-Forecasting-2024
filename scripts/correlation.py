@@ -5,10 +5,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import polars as pl
 import seaborn
+
 from preprocessing import Preprocessor
 
 
-def get_daily_correlations(df, responder, feature_set):
+def get_daily_correlations(df, responder):
+    feature_set = [col for col in df.columns if "feature" in col]
     daily_correlations = []
     for day in df["date_id"].unique():
         day_data = df[df["date_id"] == day]
@@ -22,10 +24,13 @@ def get_daily_correlations(df, responder, feature_set):
 
 
 if __name__ == "__main__":
-    feature_set = [f"feature_{i:02}" for i in range(3)]  # Limit the number of features
+    feature_set = [f"feature_{i:02}" for i in range(3)]
     symbol_id = 1
     responder = 6
     partition_id = 0
     raw_data = Preprocessor(
         symbol_id, responder, partition_id, feature_set
     ).read_partition()
+
+    corr_df = get_daily_correlations(raw_data, responder)
+    print(corr_df.head(100))

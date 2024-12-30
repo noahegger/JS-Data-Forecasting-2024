@@ -10,14 +10,15 @@ train_parquets = [
     f"{DATA_DIR}/train.parquet/partition_id={i}/part-0.parquet"
     for i in range(N_PARTITION)
 ]
+test_parquet = f"{DATA_DIR}/lags.parquet/date_id=0"
 
 
 class Preprocessor:
     def __init__(
         self,
-        symbol_id: int,
-        responder: int,
-        partition_id: int = 0,
+        symbol_id: Optional[int] = None,
+        responder: int = 6,
+        partition_ids: Optional[list[int]] = None,
         feature_set: Optional[list] = None,
         sample_frequency: int = 15,
         exclude_set: list = [
@@ -34,7 +35,7 @@ class Preprocessor:
     ):
         self.symbol_id = symbol_id
         self.responder = responder
-        self.partition_id = partition_id
+        self.partition_ids = partition_ids
         self.feature_set = feature_set
         self.sample_frequency = sample_frequency
         self.exclude_set = exclude_set
@@ -69,23 +70,23 @@ class Preprocessor:
         return df
 
     def read_partition(self, read_all=False) -> pd.DataFrame:
-        if read_all:
-            df = pd.concat([pd.read_parquet(parquet) for parquet in train_parquets])
+        if self.partition_ids:
+            if read_all:
+                df = pd.concat([pd.read_parquet(parquet) for parquet in train_parquets])
+            else:
+                dfs = []
+                for partition_id in self.partition_ids:
+                    dfs.append(pd.read_parquet(train_parquets[partition_id]))
+                df = pd.concat(dfs, ignore_index=True)
         else:
-            df = pd.read_parquet(train_parquets[self.partition_id])
+            df = pd.read_parquet(test_parquet)
 
         df = self.create_time_index(df)
-        df = self.filter_symbol(df, self.symbol_id)
+        if self.symbol_id:
+            df = self.filter_symbol(df, self.symbol_id)
         df = self.resample(df, self.sample_frequency)
 
         if self.exclude_set:
             df.drop(columns=self.exclude_set, inplace=True)
-
-        # if self.feature_set:
-        #     return df[
-        #         ["time_index", "date_id", "time_id", "weight"]
-        #         + self.feature_set
-        #         + [f"responder_{self.responder}"]
-        #     ]
 
         return df

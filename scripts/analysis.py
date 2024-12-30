@@ -205,7 +205,7 @@ def plot_mean_by_time_id(df, lookback: int, tdate: int, responder_column="respon
 
 
 def plot_daily_responder_vs_feature(
-    df, lookback: int, tdate: int, responder_column="responder_6"
+    df, lookback: int, tdate: int, feature: str, responder_column="responder_6"
 ):
     plt.figure(figsize=(12, 8))
 
@@ -230,7 +230,7 @@ def plot_daily_responder_vs_feature(
         lookback_dates,
         feature_values,
         marker="x",
-        label=f"Mean {responder_column} over {lookback} days",
+        label=f"{feature} over {lookback} days",
     )
 
     # Plot exponential weighted mean for tdate
@@ -276,17 +276,17 @@ if __name__ == "__main__":
 
     sym = 0
     responder = 6
-    partition = 0
+    partitions = [0, 1]
     feature_set = [f"feature_{i:02}" for i in range(40)]  # Limit the number of features
     # feature_set = [f"feature_12"]  # Limit the number of features
 
     df = Preprocessor(
         symbol_id=sym,
         responder=responder,
-        partition_id=partition,
+        # partition_ids=partitions,
         feature_set=feature_set,
         sample_frequency=5,
-    ).read_partition(read_all=True)
+    ).read_partition()
 
     # plot_time_series(
     #     df[1000:2000],
@@ -318,7 +318,9 @@ if __name__ == "__main__":
 
     # plot_mean_by_time_id(df, lookback=15, tdate=96)
     # plot_average_responder_over_days(df, lookback=30, tdate=100)
-    plot_daily_responder_vs_feature(df, lookback=150, tdate=200)
+    # plot_daily_responder_vs_feature(
+    #     df, lookback=150, tdate=200, feature="15-D EWMA Mean"
+    # )
     # plot_time_series(
     #     df,
     #     columns=["responder_6", "feature_10", "feature_12"],
