@@ -27,7 +27,7 @@ if __name__ == "__main__":
     feature_set = [f"feature_{i:02}" for i in range(3)]
     symbol_id = 1
     responder = 6
-    partition_id = 0
+    partition_id = [0]
     raw_data = Preprocessor(
         symbol_id, responder, partition_id, feature_set
     ).read_partition()

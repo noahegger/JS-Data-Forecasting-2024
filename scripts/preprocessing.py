@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import pandas as pd
 
@@ -44,15 +44,11 @@ class Preprocessor:
         return df[df["symbol_id"] == symbol_id]
 
     def resample(self, df: pd.DataFrame, sample_frequency: int):
-        return (
-            df.set_index("time_index")
-            .resample(f"{sample_frequency}min")
-            .first()
-            .reset_index()
-        )
+        df.set_index("time_index", inplace=True)
+        df = df.resample(f"{sample_frequency}min").first().reset_index()
+        return df
 
-    def create_time_index(self, df: pd.DataFrame) -> pd.DataFrame:
-
+    def create_time_index(self, df: pd.DataFrame):
         # Convert to numpy.int32 to prevent overflow
         df["date_id"] = df["date_id"].astype("int32")
         df["time_id"] = df["time_id"].astype("int32")
@@ -67,26 +63,43 @@ class Preprocessor:
             + pd.to_timedelta(df["minute"], unit="m")
         )
 
-        return df
-
-    def read_partition(self, read_all=False) -> pd.DataFrame:
+    def read_partition(self, read_all=False) -> Dict[str, pd.DataFrame]:
         if self.partition_ids:
             if read_all:
-                df = pd.concat([pd.read_parquet(parquet) for parquet in train_parquets])
+                main_df = pd.concat(
+                    [pd.read_parquet(parquet) for parquet in train_parquets]
+                )
             else:
                 dfs = []
                 for partition_id in self.partition_ids:
                     dfs.append(pd.read_parquet(train_parquets[partition_id]))
-                df = pd.concat(dfs, ignore_index=True)
+                main_df = pd.concat(dfs, ignore_index=True)
         else:
-            df = pd.read_parquet(test_parquet)
+            main_df = pd.read_parquet(test_parquet)
 
-        df = self.create_time_index(df)
-        if self.symbol_id:
-            df = self.filter_symbol(df, self.symbol_id)
-        df = self.resample(df, self.sample_frequency)
+        symbol_dfs = {}
+        for symbol_id, group in main_df.groupby("symbol_id"):
+            self.create_time_index(group)
+            group = self.resample(group, self.sample_frequency)
+            if self.exclude_set:
+                group.drop(columns=self.exclude_set, inplace=True)
+            symbol_dfs[f"symbol_{symbol_id:02}"] = group
 
-        if self.exclude_set:
-            df.drop(columns=self.exclude_set, inplace=True)
+        return symbol_dfs
 
-        return df
+    def windsorize(
+        self,
+        df: pd.DataFrame,
+        lower_percentile: float = 0.02,
+        upper_percentile: float = 0.98,
+    ):
+        lower_bound = df.quantile(lower_percentile)
+        upper_bound = df.quantile(upper_percentile)
+        df.clip(lower=lower_bound, upper=upper_bound, axis=1, inplace=True)
+
+    def map_symbols_to_dfs(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+        symbol_dfs = {}
+        for symbol_id in df["symbol_id"].unique():
+            symbol_df = self.filter_symbol(df, symbol_id)
+            symbol_dfs[f"symbol_{symbol_id:02}"] = symbol_df
+        return symbol_dfs
