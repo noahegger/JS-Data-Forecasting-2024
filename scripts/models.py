@@ -19,14 +19,12 @@ class BaseModel(ABC):
 class EnsembleTimeSeriesV1(BaseModel):
     def __init__(
         self,
-        context: str,
         online_feature: OnlineMovingAverageCalculator,
         long_term_feature: ExpWeightedMeanCalculator,
         rev_decay_calculator: RevDecayCalculator,
         st_window: int = 15,
         lt_window: int = 15,
     ):
-        self.context = context
         self.online_feature = online_feature
         self.long_term_feature = long_term_feature
         self.rev_decay_calculator = rev_decay_calculator
