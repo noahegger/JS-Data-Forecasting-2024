@@ -15,6 +15,10 @@ LOCAL_DATA_DIR = Path("/Users/noahegger/git/JS-Data-Forecasting-2024")
 PROJECT_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_PATH))
 
+META_COLS = ["date_id", "time_id", "symbol_id", "weight"]
+FEATURE_COLS = [f"feature_{x:02}" for x in range(79)]
+RESPONDER_COLS = [f"responder_{i}" for i in range(9)]
+
 from scripts.calculators import (
     ExpWeightedMeanCalculator,
     MovingAverageCalculator,
@@ -37,14 +41,21 @@ class InferenceServer:
         feature_cols: List[str] = ["responder_6"],
         test: bool = False,
         partition_ids: Optional[List[int]] = None,
-        synthetic_days: Optional[int] = 50,  # Initialize synthetic_days
-        num_score_dates: int = 5,  # Initialize num_score_dates
+        synthetic_days: int = 50,
+        num_score_dates: int = 5,
+        date_offset: int = 1690,
     ):
         self.model = model
         self.preprocessor = preprocessor
         self.dir = dir
-        self.test_parquet = test_parquet
-        self.lag_parquet = lag_parquet
+        # if test_parquet is None or lag_parquet is None:
+        #     import warnings
+
+        #     warnings.warn(
+        #         "File paths for test_parquet or lag_parquet are not specified."
+        #     )
+        self.test_parquet = str(test_parquet) if test_parquet else ""
+        self.lag_parquet = str(lag_parquet) if lag_parquet else ""
         self.cache_lb_days = cache_lb_days
         self.feature_cols = feature_cols
         self.cache_history = {}
@@ -53,8 +64,9 @@ class InferenceServer:
         self.time_step_count = 0
         self.test = test
         self.partition_ids = partition_ids
-        self.synthetic_days = synthetic_days  # Initialize synthetic_days
-        self.num_score_dates = num_score_dates  # Initialize num_score_dates
+        self.synthetic_days = synthetic_days
+        self.num_score_dates = num_score_dates
+        self.date_offset = date_offset
 
         self.ensure_parquet_files()
         self.total_time_steps = self.calculate_total_time_steps()
@@ -70,43 +82,86 @@ class InferenceServer:
             self.test_parquet, self.lag_parquet = self.generate_synthetic_data()
 
     def generate_synthetic_data(self):
-        if self.partition_ids:
-            train_parquets = [
-                f"{self.dir}/train.parquet/partition_id={i}/part-0.parquet"
-                for i in self.partition_ids
-            ]
-        else:
-            train_parquets = [
-                f"{self.dir}/train.parquet/partition_id={i}/part-0.parquet"
-                for i in range(10)
-            ]
+        # Determine the parquet files to read based on partition_ids
+        train_parquets = [
+            f"{self.dir}/train.parquet/partition_id={i}/part-0.parquet"
+            for i in (self.partition_ids or range(10))
+        ]
+
+        # Read and concatenate the parquet files
         train_data = pl.concat([pl.read_parquet(parquet) for parquet in train_parquets])
 
-        if self.synthetic_days:
-            date_ids = sorted(train_data["date_id"].unique())[: self.synthetic_days]
-            test_data = train_data.filter(pl.col("date_id").is_in(date_ids))
-            lag_data = train_data.filter(pl.col("date_id").is_in(date_ids))
-        else:
-            test_data, lag_data = train_data, train_data
+        # Filter data based on synthetic_days
+        # if self.synthetic_days:
+        date_ids = sorted(train_data["date_id"].unique())[: self.synthetic_days]
+        test_data, lag_data = (
+            train_data.filter(pl.col("date_id").is_in(date_ids)),
+            train_data.filter(pl.col("date_id").is_in(date_ids)),
+        )
+        # else:
+        #     test_data, lag_data = train_data, train_data
 
-        # Add "is_scored" column
+        # add row_id column, offset by the last date_id
+        # should be 1690 if using the entire train_parquet
+
         test_data = test_data.with_columns(
-            pl.when(pl.col("date_id") < self.num_score_dates)
+            pl.col("date_id") - self.cache_lb_days
+        ).with_row_index(name="row_id", offset=0)
+
+        # num_scored_days = self.synthetic_days - self.cache_lb_days
+        # Add "is_scored" column to test_data
+        test_data = test_data.with_columns(
+            pl.when(pl.col("date_id") <= 0)
             .then(False)
             .otherwise(True)
             .alias("is_scored")
         )
 
-        test_parquet_path = self.test_parquet
-        lag_parquet_path = self.lag_parquet
+        # Select relevant columns for test_data and lag_data
+        test_data = test_data.select(
+            ["row_id"] + META_COLS + ["is_scored"] + FEATURE_COLS
+        )
+        lag_data = lag_data.select(META_COLS + RESPONDER_COLS)
 
-        if test_parquet_path and lag_parquet_path:
-            Path(test_parquet_path).parent.mkdir(parents=True, exist_ok=True)
-            Path(lag_parquet_path).parent.mkdir(parents=True, exist_ok=True)
-            test_data.write_parquet(test_parquet_path)
-            lag_data.write_parquet(lag_parquet_path)
+        # Define paths for synthetic data
+        test_parquet_path = Path(self.test_parquet)
+        lag_parquet_path = Path(self.lag_parquet)
 
-        return test_parquet_path, lag_parquet_path  # Return Path objects
+        # Create directories if they don't exist
+        test_parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        lag_parquet_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Partition and save test_data
+        test_data_partition = test_data.partition_by(
+            "date_id", maintain_order=True, as_dict=True
+        )
+        row_id_offset = (
+            test_data.filter(pl.col("date_id") < 0).select("row_id").max().item()
+        )
+
+        for key, _df in test_data_partition.items():
+            if key[0] >= 0:
+                partition_dir = test_parquet_path / f"date_id={key[0]}"
+                partition_dir.mkdir(parents=True, exist_ok=True)
+                _df = _df.with_columns(pl.col("row_id") - row_id_offset)
+                _df.write_parquet(partition_dir / "part-0.parquet")
+
+        # Partition and save lag_data
+        lag_data = lag_data.with_columns(pl.col("date_id") - self.cache_lb_days)
+        lag_data = lag_data.rename(
+            {f"responder_{x}": f"responder_{x}_lag_1" for x in range(9)}
+        )
+        lag_data_partition = lag_data.partition_by(
+            "date_id", maintain_order=True, as_dict=True
+        )
+
+        for key, _df in lag_data_partition.items():
+            partition_dir = lag_parquet_path / f"date_id={key[0] + 1}"
+            partition_dir.mkdir(parents=True, exist_ok=True)
+            _df = _df.with_columns(pl.col("date_id") + 1)
+            _df.write_parquet(partition_dir / "part-0.parquet")
+
+        return str(test_parquet_path), str(lag_parquet_path)
 
     def calculate_total_time_steps(self):
         if self.test and self.test_parquet:
@@ -133,7 +188,7 @@ class InferenceServer:
 
             for (time_id,), test in test_batches:
                 test_batch = (test, lags if time_id == 0 else None)
-                validation_data = test.select("symbol_id")  # row_id in gateway
+                validation_data = test.select("row_id")  # row_id in gateway
                 yield test_batch, validation_data
 
     def run_inference_server(self):
