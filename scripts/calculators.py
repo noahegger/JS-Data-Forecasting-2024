@@ -29,22 +29,16 @@ class ExpWeightedMeanCalculator(Calculator):
         self.max_nans = max_nans
         self.replace = replace
 
-    def calculate(self, df: pd.DataFrame, tdate: int, feature_column: str) -> float:
-        lookback_dates = range(tdate - self.lookback, tdate)
-        mean_values = []
+    def calculate(self, values: list, feature_column: str) -> float:
 
-        for date in lookback_dates:
-            daily_mean = df[df["date_id"] == date][feature_column].mean()
-            mean_values.append(daily_mean)
-
-        nan_count = sum(pd.isna(mean_values))
+        nan_count = sum(pd.isna(values))
         if nan_count > self.max_nans:
             return 0
 
         if self.replace:
-            mean_values = [0 if pd.isna(m) else m for m in mean_values]
+            values = [0 if pd.isna(m) else m for m in values]
 
-        res = utils.time_weighted_mean(mean_values, self.lookback, self.halflife)
+        res = utils.time_weighted_mean(values, self.lookback, self.halflife)
         return res
 
 
@@ -84,17 +78,12 @@ class RevDecayCalculator(Calculator):
 
 
 class OnlineMovingAverageCalculator(Calculator):
-    def __init__(self, window):
-        self.min_periods = window
+
+    def __init__(self, window: int):
         self.window = window
 
-    def calculate(
-        self, df: pd.DataFrame, tdate: int, feature_column: str
-    ) -> pd.DataFrame:
-        df = df[df["date_id"] == tdate]
-        df[f"online_moving_average_{self.window}"] = (
-            df[feature_column]
-            .rolling(window=self.window, min_periods=self.min_periods)
-            .mean()
-        )
-        return df[f"online_moving_average_{self.window}"].iloc[-1]
+    def calculate(self, data: np.ndarray, tdate: int, feature_column: str):
+        # Calculate the moving average over the window
+        if len(data) < self.window:
+            return np.mean(data)
+        return np.mean(data[-self.window :])
