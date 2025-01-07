@@ -2,7 +2,9 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import utils as utils
+from record import SymbolRecord
 
 
 class Calculator(ABC):
@@ -29,7 +31,9 @@ class ExpWeightedMeanCalculator(Calculator):
         self.max_nans = max_nans
         self.replace = replace
 
-    def calculate(self, values: list, feature_column: str) -> float:
+    def calculate(self, values: list) -> float:
+        if len(values) < self.lookback:
+            return sum(values) / len(values) if values else 0
 
         nan_count = sum(pd.isna(values))
         if nan_count > self.max_nans:
@@ -78,12 +82,9 @@ class RevDecayCalculator(Calculator):
 
 
 class OnlineMovingAverageCalculator(Calculator):
-
     def __init__(self, window: int):
         self.window = window
 
-    def calculate(self, data: np.ndarray, tdate: int, feature_column: str):
+    def calculate(self, data: pl.DataFrame, feature_column: str):
         # Calculate the moving average over the window
-        if len(data) < self.window:
-            return np.mean(data)
-        return np.mean(data[-self.window :])
+        return data[feature_column].mean()

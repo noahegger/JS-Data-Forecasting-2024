@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 
 import numpy as np
+from record import SymbolRecord
 
 from scripts.calculators import (
     Calculator,
@@ -32,15 +33,21 @@ class EnsembleTimeSeriesV1(BaseModel):
         self.st_window = st_window
         self.lt_window = lt_window
 
-    def get_daily_estimate(self, data: np.ndarray, tdate: int, feature_column: str):
-        return self.online_feature.calculate(data, tdate, feature_column)
+    def get_daily_estimate(self, daily_record: SymbolRecord, feature_column: str):
+        return self.online_feature.calculate(daily_record.data, feature_column)
 
-    def get_estimate(self, cache: deque, tdate: int, feature_column: str):
+    def get_estimate(
+        self,
+        symbol_history: deque[SymbolRecord],
+        symbol_lags: deque[SymbolRecord],
+        tdate: int,
+    ):
         daily_estimates = [
-            self.get_daily_estimate(data, tdate, feature_column) for _, data in cache
+            self.get_daily_estimate(daily_record, "responder_6_lag_1")
+            for daily_record in symbol_lags
         ]
 
-        return self.long_term_feature.calculate(daily_estimates, feature_column)
+        return self.long_term_feature.calculate(daily_estimates)
 
     def get_estimates(
         self,
@@ -51,15 +58,15 @@ class EnsembleTimeSeriesV1(BaseModel):
         ttime: int,
     ):
         estimates = []
-        for id in symbol_ids:
-            cache_days = cache_history[id]
+        for symbol in symbol_ids:
+            try:
+                symbol_history = cache_history[symbol]
+                symbol_lags = lag_cache[symbol]
+                estimates.append(self.get_estimate(symbol_history, symbol_lags, tdate))
+            except KeyError:
+                print(
+                    f"Symbol: {symbol} not found in cache for tdate, ttime: {tdate, ttime}. Filling with 0"
+                )
+                estimates.append(0)
 
-            estimates.append(self.get_estimate(cache, tdate, feature_columns))
-
-        # for symbol_id, cache_days in cache_history.items():
-        #     estimates[symbol_id] = {}
-        #     for feature_column in feature_columns:
-        #         estimates[symbol_id][feature_column] = self.get_estimate(
-        #             cache, tdate, feature_column
-        #         )
         return estimates
