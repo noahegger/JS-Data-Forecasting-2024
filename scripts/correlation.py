@@ -6,7 +6,7 @@ import pandas as pd
 import polars as pl
 import seaborn
 
-from preprocessing import Preprocessor
+from scripts.data_preprocessing import Preprocessor
 
 
 def get_daily_correlations(df, responder):

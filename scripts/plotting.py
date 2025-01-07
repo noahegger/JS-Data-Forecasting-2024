@@ -7,7 +7,8 @@ import seaborn as sns
 import utils as utils
 from calculators import ExpWeightedMeanCalculator
 from cycler import cycler
-from preprocessing import Preprocessor
+
+from scripts.data_preprocessing import Preprocessor
 
 
 def apply_custom_style():

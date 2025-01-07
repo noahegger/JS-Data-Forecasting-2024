@@ -22,7 +22,8 @@ from plotting import (
     plot_scatter,
     plot_time_series,
 )
-from preprocessing import Preprocessor
+
+from scripts.data_preprocessing import Preprocessor
 
 # plt.style.use("dark_background")  # Changed to dark background
 

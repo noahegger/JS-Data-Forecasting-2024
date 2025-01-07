@@ -2,14 +2,13 @@ from abc import ABC, abstractmethod
 from collections import deque
 
 import numpy as np
-from record import SymbolRecord
-
-from scripts.calculators import (
+from calculators import (
     Calculator,
     ExpWeightedMeanCalculator,
     OnlineMovingAverageCalculator,
     RevDecayCalculator,
 )
+from record import SymbolRecord
 
 
 class BaseModel(ABC):

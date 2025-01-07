@@ -25,8 +25,8 @@ from scripts.calculators import (
     OnlineMovingAverageCalculator,
     RevDecayCalculator,
 )
+from scripts.data_preprocessing import Preprocessor
 from scripts.models import BaseModel, EnsembleTimeSeriesV1
-from scripts.preprocessing import Preprocessor
 from scripts.record import Cache, SymbolRecord
 
 
