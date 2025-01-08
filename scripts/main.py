@@ -211,8 +211,6 @@ class Predictor:
                 test_data, lag_data
             ):
                 test, lags = test_batch
-                if lags is None:
-                    lags = pl.DataFrame()
                 self.predict(test, lags)
         else:
             import kaggle_evaluation.jane_street_inference_server as js_server
@@ -289,7 +287,7 @@ class Predictor:
 
         self.time_step_count += 1
         self.pbar.update(1)
-
+        print(predictions)
         return predictions
 
     def initialize_cache(self, data: pl.DataFrame):

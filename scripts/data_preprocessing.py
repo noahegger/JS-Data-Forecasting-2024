@@ -4,8 +4,8 @@ from typing import Dict, Optional
 
 import pandas as pd
 
-# DATA_DIR = Path("/Users/noahegger/git/JS-Data-Forecasting-2024")
-DATA_DIR = Path("/kaggle/input/jane-street-real-time-market-data-forecasting")
+DATA_DIR = Path("/Users/noahegger/git/JS-Data-Forecasting-2024")
+# DATA_DIR = Path("/kaggle/input/jane-street-real-time-market-data-forecasting")
 N_PARTITION = len(os.listdir(DATA_DIR / "train.parquet"))
 train_parquets = [
     f"{DATA_DIR}/train.parquet/partition_id={i}/part-0.parquet"
