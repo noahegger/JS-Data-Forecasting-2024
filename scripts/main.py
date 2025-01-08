@@ -39,8 +39,6 @@ class Predictor:
         test_parquet: Optional[str] = None,
         lag_parquet: Optional[str] = None,
         cache_lb_days: int = 15,
-        feature_cols: List[str] = FEATURE_COLS,
-        responder_cols: List[str] = RESPONDER_COLS,
         test: bool = False,
         partition_ids: Optional[List[int]] = None,
         synthetic_days: int = 50,
@@ -53,8 +51,6 @@ class Predictor:
         self.test_parquet = str(test_parquet) if test_parquet else ""
         self.lag_parquet = str(lag_parquet) if lag_parquet else ""
         self.cache_lb_days = cache_lb_days
-        self.feature_cols = feature_cols
-        self.responder_cols = responder_cols
         self.cache_history = Cache(maxlen=self.cache_lb_days)
         self.lag_cache = Cache(maxlen=self.cache_lb_days)
         self.test_ = None
@@ -126,7 +122,7 @@ class Predictor:
 
         # Select relevant columns for test_data and lag_data
         test_data = test_data.select(
-            ["row_id"] + META_COLS + ["is_scored"] + FEATURE_COLS
+            ["row_id"] + META_COLS + ["weight"] + ["is_scored"] + FEATURE_COLS
         )
         lag_data = lag_data.select(META_COLS + RESPONDER_COLS)
 
@@ -239,7 +235,7 @@ class Predictor:
     ) -> pl.DataFrame | pd.DataFrame:
 
         if lags is not None:
-            lag_responder_cols = [f"{col}_lag_1" for col in self.responder_cols]
+            lag_responder_cols = [f"{col}_lag_1" for col in RESPONDER_COLS]
             for (symbol_id,), batch in lags.group_by("symbol_id", maintain_order=True):
 
                 batch_data = batch.select(META_COLS + lag_responder_cols)
@@ -255,7 +251,7 @@ class Predictor:
                 for (symbol_id,), batch in test.group_by(
                     "symbol_id", maintain_order=True
                 ):
-                    batch_data = batch.select(META_COLS + self.feature_cols)
+                    batch_data = batch.select(META_COLS + ["weight"] + FEATURE_COLS)
                     date_id = batch["date_id"][0]
                     self.cache_history.update(symbol_id, date_id, batch_data)  # type: ignore
 
@@ -297,8 +293,8 @@ class Predictor:
         return predictions
 
     def initialize_cache(self, data: pl.DataFrame):
-        self.cache_history.initialize(data, META_COLS + self.feature_cols)
-        self.lag_cache.initialize(data, META_COLS + self.responder_cols, lagged=True)
+        self.cache_history.initialize(data, META_COLS + ["weight"] + FEATURE_COLS)
+        self.lag_cache.initialize(data, META_COLS + RESPONDER_COLS, lagged=True)
 
 
 if __name__ == "__main__":
@@ -340,8 +336,6 @@ if __name__ == "__main__":
             test_parquet=f"{LOCAL_DATA_DIR}/synthetic_test.parquet",
             lag_parquet=f"{LOCAL_DATA_DIR}/synthetic_lag.parquet",
             cache_lb_days=15,
-            feature_cols=FEATURE_COLS,
-            responder_cols=RESPONDER_COLS,
             test=True,  # Set to True for local testing
             partition_ids=[0],  # Specify partition IDs for synthetic data
             synthetic_days=50,  # Pass synthetic_days parameter
@@ -355,8 +349,6 @@ if __name__ == "__main__":
             test_parquet=f"{DATA_DIR}/synthetic_test.parquet",
             lag_parquet=f"{DATA_DIR}/synthetic_lag.parquet",
             cache_lb_days=15,
-            feature_cols=FEATURE_COLS,
-            responder_cols=RESPONDER_COLS,
             test=True,  # Set to False for Kaggle test
             partition_ids=[0],  # Specify partition IDs for synthetic data
             synthetic_days=50,  # Pass synthetic_days parameter
@@ -370,8 +362,6 @@ if __name__ == "__main__":
             test_parquet=f"{DATA_DIR}/test.parquet",
             lag_parquet=f"{DATA_DIR}/lags.parquet",
             cache_lb_days=15,
-            feature_cols=FEATURE_COLS,
-            responder_cols=RESPONDER_COLS,
             test=False,  # Set to False for Kaggle submission
         )
 
