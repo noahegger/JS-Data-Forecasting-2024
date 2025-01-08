@@ -15,7 +15,7 @@ LOCAL_DATA_DIR = Path("/Users/noahegger/git/JS-Data-Forecasting-2024")
 PROJECT_PATH = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_PATH))
 
-META_COLS = ["date_id", "time_id", "symbol_id", "weight"]
+META_COLS = ["date_id", "time_id", "symbol_id"]
 FEATURE_COLS = [f"feature_{x:02}" for x in range(79)]
 RESPONDER_COLS = [f"responder_{i}" for i in range(9)]
 
@@ -30,7 +30,7 @@ from scripts.models import BaseModel, EnsembleTimeSeriesV1
 from scripts.record import Cache, SymbolRecord
 
 
-class InferenceServer:
+class Predictor:
     def __init__(
         self,
         model,
@@ -287,6 +287,12 @@ class InferenceServer:
             predictions = pl.DataFrame(
                 {"row_id": test["row_id"], "responder_6": [0] * len(test)}
             )
+        assert isinstance(predictions, pl.DataFrame | pd.DataFrame)
+        assert list(predictions.columns) == ["row_id", "responder_6"]
+        assert len(predictions) == len(test)
+
+        self.time_step_count += 1
+        self.pbar.update(1)
 
         return predictions
 
@@ -327,7 +333,7 @@ if __name__ == "__main__":
     )
 
     if LOCAL_TEST:
-        inference_server = InferenceServer(
+        predictor = Predictor(
             model=model,
             preprocessor=preprocessor,
             dir=LOCAL_DATA_DIR,
@@ -342,7 +348,7 @@ if __name__ == "__main__":
             num_score_dates=5,  # Pass num_score_dates parameter
         )
     elif KAGGLE_TEST:
-        inference_server = InferenceServer(
+        predictor = Predictor(
             model=model,
             preprocessor=preprocessor,
             dir=DATA_DIR,
@@ -357,7 +363,7 @@ if __name__ == "__main__":
             num_score_dates=5,  # Pass num_score_dates parameter
         )
     else:
-        inference_server = InferenceServer(
+        predictor = Predictor(
             model=model,
             preprocessor=preprocessor,
             dir=DATA_DIR,
@@ -369,4 +375,4 @@ if __name__ == "__main__":
             test=False,  # Set to False for Kaggle submission
         )
 
-    inference_server.run_inference_server()
+    predictor.run_inference_server()
