@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+import polars as pl
 from sklearn.linear_model import Lasso, LinearRegression, Ridge
 
 
@@ -121,6 +122,52 @@ def get_date_series_r2(df, y_true_col, y_pred_col, weights_col=None, symbol=None
             df, date_id, y_true_col, y_pred_col, weights_col, symbol
         )
     return r2_series
+
+
+class PerformanceMonitor:
+    def __init__(self):
+        self.batch_performances = []
+        self.r2_records = []
+
+    def record_performance(self, test, pred):
+        # Ensure pred is a DataFrame and rename the responder_6 column
+        pred = pred.rename({"responder_6": "responder_6_pred"})
+        # Add responder_6_pred column to test DataFrame
+        merged_df = test.with_columns(pred["responder_6_pred"])
+        self.batch_performances.append(merged_df)
+
+        # Calculate custom R² score
+        r2_score = self.get_custom_r2(
+            merged_df["responder_6"].to_numpy(),
+            merged_df["responder_6_pred"].to_numpy(),
+            merged_df["weight"].to_numpy() if "weight" in merged_df.columns else None,
+        )
+        print(f"Custom R² score: {r2_score}")
+
+        # Record date_id, time_id, and r2_score
+        date_id = test["date_id"].unique()[0]
+        time_id = test["time_id"].unique()[0]
+        self.r2_records.append({"date_id": date_id, "time_id": time_id, "r2": r2_score})
+
+    def save_results(
+        self, performance_path="performance_tracking.parquet", r2_path="r2.parquet"
+    ):
+        # Concatenate all batches into a single DataFrame
+        performance_tracking_df = pl.concat(self.batch_performances)
+        performance_tracking_df.write_parquet(performance_path)
+
+        # Create a DataFrame for R² records and write to a Parquet file
+        r2_df = pl.DataFrame(self.r2_records)
+        r2_df.write_parquet(r2_path)
+
+    @staticmethod
+    def get_custom_r2(y_true, y_pred, weights=None):
+        if weights is None:
+            weights = np.ones_like(y_true)
+
+        ss_res = np.sum(weights * (y_true - y_pred) ** 2)
+        ss_tot = np.sum(weights * (y_true) ** 2)
+        return 1 - ss_res / ss_tot
 
 
 class LinearCalculator(ABC):

@@ -3,12 +3,12 @@ from typing import Optional
 import calculators as calculators
 import matplotlib.pyplot as plt
 import pandas as pd
+import polars as pl
 import seaborn as sns
 import utils as utils
 from calculators import ExpWeightedMeanCalculator
 from cycler import cycler
-
-from scripts.data_preprocessing import Preprocessor
+from data_preprocessing import Preprocessor
 
 
 def apply_custom_style():
@@ -317,9 +317,7 @@ def plot_daily_responder_vs_feature(
     for date in lookback_dates:
         daily_mean = df[df["date_id"] == date][responder_column].mean()
         mean_values.append(daily_mean)
-        feature_values.append(
-            ExpWeightedMeanCalculator().calculate(df, date, responder_column)
-        )
+        feature_values.append(ExpWeightedMeanCalculator().calculate(mean_values))
 
     plt.plot(
         lookback_dates,
@@ -434,4 +432,24 @@ def plot_predictions_vs_true(predictions: pd.DataFrame, true_values: pd.DataFram
     plt.xlabel("Date ID")
     plt.ylabel("Responder 6")
     plt.legend()
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_r2_time_series(r2_parquet_path):
+    # Read the R² data from the Parquet file
+    r2_df = pd.read_parquet(r2_parquet_path)
+
+    # Convert to pandas DataFrame for plotting
+    # r2_df_pd = r2_df.to_pandas()
+    rolling_mean = r2_df["r2"].rolling(window=30).mean()
+
+    # Create a time series plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(r2_df.index, r2_df["r2"], linestyle="--")
+    plt.plot(r2_df.index, rolling_mean, linestyle="-")
+    plt.xlabel("Time ID")
+    plt.ylabel("R² Score")
+    plt.title("R² Score Time Series")
+    plt.grid(True)
     plt.show()

@@ -1,4 +1,5 @@
 import datetime as dt
+from pathlib import Path
 from typing import Optional
 
 import calculators as calculators
@@ -9,6 +10,7 @@ import pandas as pd
 import polars as pl
 import seaborn as sns
 from cycler import cycler
+from data_preprocessing import Preprocessor
 from plotting import (
     get_static_correlation_matrix,
     plot_average_responder_over_days,
@@ -19,21 +21,21 @@ from plotting import (
     plot_multi_scatter,
     plot_multiday,
     plot_multiday_with_histogram,
+    plot_r2_time_series,
     plot_scatter,
     plot_time_series,
 )
 
-from scripts.data_preprocessing import Preprocessor
-
+DATA_DIR = Path("/Users/noahegger/git/JS-Data-Forecasting-2024")
 # plt.style.use("dark_background")  # Changed to dark background
-
 
 if __name__ == "__main__":
 
-    start = 0
-    end = 50
+    # start = 0
+    # end = 50
 
-    data = Preprocessor(
-        partition_ids=[0],
-        sample_frequency=15,
-    ).read_partition()
+    # data = Preprocessor(
+    #     partition_ids=[0],
+    #     sample_frequency=15,
+    # ).read_partition()
+    plot_r2_time_series(f"{DATA_DIR}/r2.parquet")

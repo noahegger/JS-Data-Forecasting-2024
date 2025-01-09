@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import IO, List, Optional, Tuple
@@ -7,6 +8,7 @@ from typing import IO, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import polars as pl
+import utils as utils
 from tqdm import tqdm
 
 # Define a global variable for the project path
@@ -19,15 +21,16 @@ META_COLS = ["date_id", "time_id", "symbol_id"]
 FEATURE_COLS = [f"feature_{x:02}" for x in range(79)]
 RESPONDER_COLS = [f"responder_{i}" for i in range(9)]
 
-from scripts.calculators import (
+from calculators import (
     ExpWeightedMeanCalculator,
     MovingAverageCalculator,
     OnlineMovingAverageCalculator,
     RevDecayCalculator,
 )
-from scripts.data_preprocessing import Preprocessor
-from scripts.models import BaseModel, EnsembleTimeSeriesV1
-from scripts.record import Cache, SymbolRecord
+from data_preprocessing import Preprocessor
+from models import BaseModel, EnsembleTimeSeriesV1
+from record import Cache, SymbolRecord
+from utils import PerformanceMonitor
 
 
 class Predictor:
@@ -42,7 +45,6 @@ class Predictor:
         test: bool = False,
         partition_ids: Optional[List[int]] = None,
         synthetic_days: int = 50,
-        num_score_dates: int = 5,
         date_offset: int = 1690,
     ):
         self.model = model
@@ -58,7 +60,6 @@ class Predictor:
         self.test = test
         self.partition_ids = partition_ids
         self.synthetic_days = synthetic_days
-        self.num_score_dates = num_score_dates
         self.date_offset = date_offset
 
         self.ensure_parquet_files()
@@ -122,7 +123,12 @@ class Predictor:
 
         # Select relevant columns for test_data and lag_data
         test_data = test_data.select(
-            ["row_id"] + META_COLS + ["weight"] + ["is_scored"] + FEATURE_COLS
+            ["row_id"]
+            + META_COLS
+            + ["weight"]
+            + ["is_scored"]
+            + FEATURE_COLS
+            + RESPONDER_COLS
         )
         lag_data = lag_data.select(META_COLS + RESPONDER_COLS)
 
@@ -199,6 +205,8 @@ class Predictor:
     def run_inference_server(self):
         self.pbar.refresh()
 
+        performance_monitor = PerformanceMonitor()
+
         if self.test:
             if self.lag_parquet and self.test_parquet:
                 lag_data = pl.scan_parquet(f"{self.lag_parquet}/**/*.parquet").collect()
@@ -211,7 +219,20 @@ class Predictor:
                 test_data, lag_data
             ):
                 test, lags = test_batch
-                self.predict(test, lags)
+                start_time = time.time()
+                pred = self.predict(test, lags)
+                end_time = time.time()
+                duration = end_time - start_time
+                print(f"self.predict(test, lags) took {duration:.4f} seconds")
+
+                # Record performance
+                performance_monitor.record_performance(test, pred)
+
+            # Save results
+            performance_monitor.save_results(
+                performance_path="performance.parquet", r2_path="r2.parquet"
+            )
+
         else:
             import kaggle_evaluation.jane_street_inference_server as js_server
 
@@ -287,7 +308,7 @@ class Predictor:
 
         self.time_step_count += 1
         self.pbar.update(1)
-        print(predictions)
+        # print(predictions)
         return predictions
 
     def initialize_cache(self, data: pl.DataFrame):
@@ -336,8 +357,7 @@ if __name__ == "__main__":
             cache_lb_days=15,
             test=True,  # Set to True for local testing
             partition_ids=[0],  # Specify partition IDs for synthetic data
-            synthetic_days=50,  # Pass synthetic_days parameter
-            num_score_dates=5,  # Pass num_score_dates parameter
+            synthetic_days=20,  # Pass synthetic_days parameter
         )
     elif KAGGLE_TEST:
         predictor = Predictor(
@@ -350,7 +370,6 @@ if __name__ == "__main__":
             test=True,  # Set to False for Kaggle test
             partition_ids=[0],  # Specify partition IDs for synthetic data
             synthetic_days=50,  # Pass synthetic_days parameter
-            num_score_dates=5,  # Pass num_score_dates parameter
         )
     else:
         predictor = Predictor(

@@ -13,6 +13,7 @@ dependencies:
   - kaggle
   - ipykernel
   - pyarrow 
+  - fastparquet
   - seaborn
   - grpcio
 prefix: /Users/noahegger/miniconda3/envs/js_env
