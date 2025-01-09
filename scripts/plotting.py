@@ -381,7 +381,7 @@ def plot_scatter(
 ):
 
     # Calculate regression
-    model = utils.LinearRegressionCalculator()
+    model = calculators.LinearRegressionCalculator()
     model.fit(X, y)
     r2 = model.score(X, y)
     y_pred = model.predict(X)
@@ -407,7 +407,7 @@ def plot_multi_scatter(df: pd.DataFrame, y: pd.DataFrame, feature_columns: list[
         X = df[[feature_column]]
 
         # Calculate regression
-        model = utils.LinearRegression()
+        model = calculators.LinearRegression()
         model.fit(X, y)
         r2 = model.score(X, y)
         y_pred = model.predict(X)
@@ -436,20 +436,31 @@ def plot_predictions_vs_true(predictions: pd.DataFrame, true_values: pd.DataFram
 
 
 @apply_custom_style_decorator
-def plot_r2_time_series(r2_parquet_path):
-    # Read the R² data from the Parquet file
-    r2_df = pd.read_parquet(r2_parquet_path)
-
-    # Convert to pandas DataFrame for plotting
-    # r2_df_pd = r2_df.to_pandas()
-    rolling_mean = r2_df["r2"].rolling(window=30).mean()
-
-    # Create a time series plot
+def plot_r2_time_series(r2_parquet_paths, start, end):
     plt.figure(figsize=(10, 6))
-    plt.plot(r2_df.index, r2_df["r2"], linestyle="--")
-    plt.plot(r2_df.index, rolling_mean, linestyle="-")
-    plt.xlabel("Time ID")
+
+    for r2_parquet_path in r2_parquet_paths:
+        # Read the R² data from the Parquet file
+        r2_df = pd.read_parquet(r2_parquet_path)
+        r2_df = r2_df[(r2_df["date_id"] >= start) & (r2_df["date_id"] <= end)]
+
+        rolling_mean = r2_df["r2"].rolling(window=30).mean()
+        mean_r2 = r2_df["r2"].mean()
+
+        file_name = r2_parquet_path.split("/")[-1].split(".")[0]
+
+        # Plot R² Score and Rolling Mean R²
+        plt.plot(r2_df.index, r2_df["r2"], linestyle="--", label=f"{file_name} R²")
+        plt.plot(
+            r2_df.index,
+            rolling_mean,
+            linestyle="-",
+            label=f"{file_name} Rolling Mean R² (Mean R²: {mean_r2:.2f})",
+        )
+
+    plt.xlabel("Index")
     plt.ylabel("R² Score")
     plt.title("R² Score Time Series")
+    plt.legend(loc="upper left")
     plt.grid(True)
     plt.show()

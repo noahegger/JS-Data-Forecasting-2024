@@ -31,11 +31,18 @@ DATA_DIR = Path("/Users/noahegger/git/JS-Data-Forecasting-2024")
 
 if __name__ == "__main__":
 
-    # start = 0
-    # end = 50
+    start = 0
+    end = 10
+
+    model_paths = [
+        f"{DATA_DIR}/model_results/Lasso_1.0_r2.parquet",
+        f"{DATA_DIR}/model_results/Lasso_0.5_r2.parquet",
+        f"{DATA_DIR}/model_results/Lasso_0.1_r2.parquet",
+        # f"{DATA_DIR}/model_results/BaseModel_r2.parquet",
+    ]
 
     # data = Preprocessor(
     #     partition_ids=[0],
     #     sample_frequency=15,
     # ).read_partition()
-    plot_r2_time_series(f"{DATA_DIR}/r2.parquet")
+    plot_r2_time_series(model_paths, start, end)

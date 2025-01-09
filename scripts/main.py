@@ -23,9 +23,11 @@ RESPONDER_COLS = [f"responder_{i}" for i in range(9)]
 
 from calculators import (
     ExpWeightedMeanCalculator,
+    LassoCalculator,
+    MeanCalculator,
     MovingAverageCalculator,
-    OnlineMovingAverageCalculator,
     RevDecayCalculator,
+    RidgeCalculator,
 )
 from data_preprocessing import Preprocessor
 from models import BaseModel, EnsembleTimeSeriesV1
@@ -41,11 +43,14 @@ class Predictor:
         dir: Optional[Path] = None,
         test_parquet: Optional[str] = None,
         lag_parquet: Optional[str] = None,
-        cache_lb_days: int = 15,
+        cache_lb_days: int = 5,
+        cache_freq: int = 15,
         test: bool = False,
         partition_ids: Optional[List[int]] = None,
+        exclude_set: Optional[set] = None,
         synthetic_days: int = 50,
         date_offset: int = 1690,
+        feature_cols: Optional[list] = None,
     ):
         self.model = model
         self.preprocessor = preprocessor
@@ -53,14 +58,19 @@ class Predictor:
         self.test_parquet = str(test_parquet) if test_parquet else ""
         self.lag_parquet = str(lag_parquet) if lag_parquet else ""
         self.cache_lb_days = cache_lb_days
-        self.cache_history = Cache(maxlen=self.cache_lb_days)
-        self.lag_cache = Cache(maxlen=self.cache_lb_days)
+        self.cache_freq = cache_freq
+        self.cache_history = Cache(maxlen=self.cache_lb_days, freq=self.cache_freq)
+        self.lag_cache = Cache(maxlen=self.cache_lb_days, freq=self.cache_freq)
         self.test_ = None
         self.time_step_count = 0
         self.test = test
         self.partition_ids = partition_ids
+        self.exclude_set = exclude_set or set()
         self.synthetic_days = synthetic_days
         self.date_offset = date_offset
+        self.feature_cols = feature_cols or [
+            col for col in FEATURE_COLS if col not in self.exclude_set
+        ]
 
         self.ensure_parquet_files()
         self.total_time_steps = self.calculate_total_time_steps()
@@ -127,7 +137,7 @@ class Predictor:
             + META_COLS
             + ["weight"]
             + ["is_scored"]
-            + FEATURE_COLS
+            + self.feature_cols
             + RESPONDER_COLS
         )
         lag_data = lag_data.select(META_COLS + RESPONDER_COLS)
@@ -230,7 +240,8 @@ class Predictor:
 
             # Save results
             performance_monitor.save_results(
-                performance_path="performance.parquet", r2_path="r2.parquet"
+                performance_path=f"{self.model.name}_performance.parquet",
+                r2_path=f"{self.model.name}_r2.parquet",
             )
 
         else:
@@ -270,7 +281,9 @@ class Predictor:
                 for (symbol_id,), batch in test.group_by(
                     "symbol_id", maintain_order=True
                 ):
-                    batch_data = batch.select(META_COLS + ["weight"] + FEATURE_COLS)
+                    batch_data = batch.select(
+                        META_COLS + ["weight"] + self.feature_cols
+                    )
                     date_id = batch["date_id"][0]
                     self.cache_history.update(symbol_id, date_id, batch_data)  # type: ignore
 
@@ -281,13 +294,26 @@ class Predictor:
                 tdate = test["date_id"][-1]
                 ttime = batch["time_id"][-1]
                 # Pass the cache history to the prediction model
-                estimates = self.model.get_estimates(
-                    symbol_ids=symbol_ids,
-                    cache_history=self.cache_history.cache,
-                    lag_cache=self.lag_cache.cache,
-                    tdate=tdate,
-                    ttime=ttime,
+                # estimates = self.model.get_estimates(
+                #     symbol_ids=symbol_ids,
+                #     cache_history=self.cache_history.cache,
+                #     lag_cache=self.lag_cache.cache,
+                #     tdate=tdate,
+                #     ttime=ttime,
+                # )
+
+                self.model.fit(
+                    symbol_ids, self.cache_history, self.lag_cache, self.feature_cols
                 )
+
+                try:
+                    estimates = self.model.get_estimates(
+                        symbol_ids=symbol_ids,
+                        test_data=test,
+                        feature_cols=self.feature_cols,
+                    )
+                except Exception as e:
+                    print(f"Error: {e}")
 
                 predictions = pl.DataFrame(
                     {
@@ -312,7 +338,7 @@ class Predictor:
         return predictions
 
     def initialize_cache(self, data: pl.DataFrame):
-        self.cache_history.initialize(data, META_COLS + ["weight"] + FEATURE_COLS)
+        self.cache_history.initialize(data, META_COLS + ["weight"] + self.feature_cols)
         self.lag_cache.initialize(data, META_COLS + RESPONDER_COLS, lagged=True)
 
 
@@ -321,13 +347,15 @@ if __name__ == "__main__":
     LOCAL_TEST = True
     KAGGLE_TEST = False
 
-    model = EnsembleTimeSeriesV1(
-        online_feature=OnlineMovingAverageCalculator(window=10),
-        long_term_feature=ExpWeightedMeanCalculator(halflife=0.35, lookback=15),
-        rev_decay_calculator=RevDecayCalculator(lookback=15),
-        st_window=15,
-        lt_window=15,
-    )
+    # model = EnsembleTimeSeriesV1(
+    #     online_feature=MeanCalculator(window=10),
+    #     long_term_feature=ExpWeightedMeanCalculator(halflife=0.35, lookback=5),
+    #     rev_decay_calculator=RevDecayCalculator(lookback=15),
+    #     st_window=15,
+    #     lt_window=15,
+    # )
+    # model = RidgeCalculator(alpha=2.0)
+    model = LassoCalculator(alpha=2.0)
     preprocessor = Preprocessor(
         symbol_id=None,
         responder=6,
@@ -354,10 +382,21 @@ if __name__ == "__main__":
             dir=LOCAL_DATA_DIR,
             test_parquet=f"{LOCAL_DATA_DIR}/synthetic_test.parquet",
             lag_parquet=f"{LOCAL_DATA_DIR}/synthetic_lag.parquet",
-            cache_lb_days=15,
+            cache_lb_days=5,
             test=True,  # Set to True for local testing
             partition_ids=[0],  # Specify partition IDs for synthetic data
-            synthetic_days=20,  # Pass synthetic_days parameter
+            exclude_set={
+                "feature_00",
+                "feature_01",
+                "feature_02",
+                "feature_03",
+                "feature_04",
+                "feature_21",
+                "feature_26",
+                "feature_27",
+                "feature_31",
+            },
+            synthetic_days=6,  # Pass synthetic_days parameter
         )
     elif KAGGLE_TEST:
         predictor = Predictor(
@@ -369,6 +408,17 @@ if __name__ == "__main__":
             cache_lb_days=15,
             test=True,  # Set to False for Kaggle test
             partition_ids=[0],  # Specify partition IDs for synthetic data
+            exclude_set={
+                "feature_00",
+                "feature_01",
+                "feature_02",
+                "feature_03",
+                "feature_04",
+                "feature_21",
+                "feature_26",
+                "feature_27",
+                "feature_31",
+            },
             synthetic_days=50,  # Pass synthetic_days parameter
         )
     else:
@@ -380,6 +430,17 @@ if __name__ == "__main__":
             lag_parquet=f"{DATA_DIR}/lags.parquet",
             cache_lb_days=15,
             test=False,  # Set to False for Kaggle submission
+            exclude_set={
+                "feature_00",
+                "feature_01",
+                "feature_02",
+                "feature_03",
+                "feature_04",
+                "feature_21",
+                "feature_26",
+                "feature_27",
+                "feature_31",
+            },
         )
 
     predictor.run_inference_server()

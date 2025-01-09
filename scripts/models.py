@@ -5,7 +5,7 @@ import numpy as np
 from calculators import (
     Calculator,
     ExpWeightedMeanCalculator,
-    OnlineMovingAverageCalculator,
+    MeanCalculator,
     RevDecayCalculator,
 )
 from record import SymbolRecord
@@ -20,12 +20,13 @@ class BaseModel(ABC):
 class EnsembleTimeSeriesV1(BaseModel):
     def __init__(
         self,
-        online_feature: OnlineMovingAverageCalculator,
+        online_feature: MeanCalculator,
         long_term_feature: ExpWeightedMeanCalculator,
         rev_decay_calculator: RevDecayCalculator,
         st_window: int = 15,
         lt_window: int = 15,
     ):
+        self.name = "BaseModel"
         self.online_feature = online_feature
         self.long_term_feature = long_term_feature
         self.rev_decay_calculator = rev_decay_calculator
@@ -44,7 +45,7 @@ class EnsembleTimeSeriesV1(BaseModel):
         daily_estimates = [
             self.get_daily_estimate(daily_record, "responder_6_lag_1")
             for daily_record in symbol_lags
-        ]
+        ][: self.lt_window]
 
         return self.long_term_feature.calculate(daily_estimates)
 

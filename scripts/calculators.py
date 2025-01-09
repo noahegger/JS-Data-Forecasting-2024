@@ -5,12 +5,196 @@ import pandas as pd
 import polars as pl
 import utils as utils
 from record import SymbolRecord
+from sklearn.linear_model import Lasso, LinearRegression, Ridge
 
 
 class Calculator(ABC):
     @abstractmethod
     def calculate(self, df):
         raise NotImplementedError("Subclasses should implement this!")
+
+
+class LinearCalculator(ABC):
+    @abstractmethod
+    def calculate(self, df):
+        raise NotImplementedError("Subclasses should implement this!")
+
+
+class LinearRegressionCalculator(LinearRegression):
+    def __init__(self):
+        super().__init__(fit_intercept=False)
+
+
+class LassoCalculator:
+    def __init__(self, alpha=1.0):
+        self.alpha = alpha
+        self.models = {}
+        self.median_calculator = MedianCalculator()
+        self.missing = {}
+        self.name = f"Lasso_{alpha}"
+
+    def fit(self, symbol_ids, cache_history, lag_cache, feature_cols):
+        for symbol_id in symbol_ids:
+            if symbol_id in lag_cache.cache and len(lag_cache.cache[symbol_id]) > 0:
+                # Get the most recent element of the lag_cache for y values
+                y_record = lag_cache.cache[symbol_id][-1]
+                y = y_record.get_feature_series("responder_6_lag_1").to_numpy().ravel()
+
+                # Get the second most recent element of the cache_history for X values
+                if len(cache_history.cache[symbol_id]) > 1:
+                    x_record = cache_history.cache[symbol_id][-2]
+                    X = x_record.data.select(feature_cols).to_numpy()
+
+                    # Calculate medians and impute NaNs
+                    self.median_calculator.calculate_medians(
+                        x_record.data, feature_cols
+                    )
+                    X = self.median_calculator.impute(X, feature_cols)
+
+                    # Identify and store features that are entirely NaN
+                    self.missing[symbol_id] = []
+                    for i, col in enumerate(feature_cols):
+                        if np.isnan(self.median_calculator.medians[col]):
+                            self.missing[symbol_id].append(col)
+
+                    # Remove entirely NaN features from X and feature_cols
+                    valid_features = [
+                        col
+                        for col in feature_cols
+                        if col not in self.missing[symbol_id]
+                    ]
+                    valid_indices = [
+                        i
+                        for i, col in enumerate(feature_cols)
+                        if col not in self.missing[symbol_id]
+                    ]
+                    X = X[:, valid_indices]
+
+                    # Fit the model for the current symbol_id
+                    model = Lasso(alpha=self.alpha)
+                    model.fit(X, y)
+                    self.models[symbol_id] = model
+
+    def predict(self, symbol_id, X):
+        if symbol_id in self.models:
+            return self.models[symbol_id].predict(X)
+        else:
+            print(f"No model found for symbol_id {symbol_id}")
+            return 0
+
+    def get_estimates(self, symbol_ids, test_data, feature_cols):
+        estimates = []
+        for symbol_id in symbol_ids:
+            symbol_data = test_data.filter(pl.col("symbol_id") == symbol_id)
+            valid_features = [
+                col
+                for col in feature_cols
+                if col not in self.missing.get(symbol_id, [])
+            ]
+            X = symbol_data.select(valid_features).to_numpy()
+
+            # Impute NaNs with medians
+            X = self.median_calculator.impute(X, valid_features)
+
+            # Predict and clip estimates
+            pred = self.predict(symbol_id, X)
+            pred = np.clip(pred, -5, 5)
+
+            estimates.append(pred)
+        return np.concatenate(estimates)
+
+
+class RidgeCalculator:
+    def __init__(self, alpha=1.0):
+        self.alpha = alpha
+        self.models = {}
+        self.median_calculator = MedianCalculator()
+        self.missing = {}
+        self.name = f"Ridge_{alpha}"
+
+    def fit(self, symbol_ids, cache_history, lag_cache, feature_cols):
+        for symbol_id in symbol_ids:
+            if symbol_id in lag_cache.cache and len(lag_cache.cache[symbol_id]) > 0:
+                # Get the most recent element of the lag_cache for y values
+                y_record = lag_cache.cache[symbol_id][-1]
+                y = y_record.get_feature_series("responder_6_lag_1").to_numpy().ravel()
+
+                # Get the second most recent element of the cache_history for X values
+                if len(cache_history.cache[symbol_id]) > 1:
+                    x_record = cache_history.cache[symbol_id][-2]
+                    X = x_record.data.select(feature_cols).to_numpy()
+
+                    # Calculate medians and impute NaNs
+                    self.median_calculator.calculate_medians(
+                        x_record.data, feature_cols
+                    )
+                    X = self.median_calculator.impute(X, feature_cols)
+
+                    # Identify and store features that are entirely NaN
+                    self.missing[symbol_id] = []
+                    for i, col in enumerate(feature_cols):
+                        if np.isnan(self.median_calculator.medians[col]):
+                            self.missing[symbol_id].append(col)
+
+                    # Remove entirely NaN features from X and feature_cols
+                    valid_features = [
+                        col
+                        for col in feature_cols
+                        if col not in self.missing[symbol_id]
+                    ]
+                    valid_indices = [
+                        i
+                        for i, col in enumerate(feature_cols)
+                        if col not in self.missing[symbol_id]
+                    ]
+                    X = X[:, valid_indices]
+
+                    # Fit the model for the current symbol_id
+                    model = Ridge(alpha=self.alpha)
+                    model.fit(X, y)
+                    self.models[symbol_id] = model
+
+    def predict(self, symbol_id, X):
+        if symbol_id in self.models:
+            return self.models[symbol_id].predict(X)
+        else:
+            print(f"No model found for symbol_id {symbol_id}")
+            return 0
+
+    def get_estimates(self, symbol_ids, test_data, feature_cols):
+        estimates = []
+        for symbol_id in symbol_ids:
+            symbol_data = test_data.filter(pl.col("symbol_id") == symbol_id)
+            valid_features = [
+                col
+                for col in feature_cols
+                if col not in self.missing.get(symbol_id, [])
+            ]
+            X = symbol_data.select(valid_features).to_numpy()
+
+            # Impute NaNs with medians
+            X = self.median_calculator.impute(X, valid_features)
+
+            estimates.append(np.clip(self.predict(symbol_id, X), -5, 5))
+        return np.concatenate(estimates)
+
+
+class MedianCalculator:
+    def __init__(self):
+        self.medians = {}
+
+    def calculate_medians(self, data: pl.DataFrame, feature_cols: list):
+        for col in feature_cols:
+            median_value = data[col].median()
+            self.medians[col] = median_value if median_value else np.nan
+
+    def impute(self, data: np.ndarray, feature_cols: list):
+        for i, col in enumerate(feature_cols):
+            if col in self.medians and not np.isnan(self.medians[col]):
+                data[:, i] = np.where(
+                    np.isnan(data[:, i]), self.medians[col], data[:, i]
+                )
+        return data
 
 
 class MovingAverageCalculator(Calculator):
@@ -81,7 +265,7 @@ class RevDecayCalculator(Calculator):
         return value * alpha
 
 
-class OnlineMovingAverageCalculator(Calculator):
+class MeanCalculator(Calculator):
     def __init__(self, window: int):
         self.window = window
 

@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import polars as pl
-from sklearn.linear_model import Lasso, LinearRegression, Ridge
 
 
 def get_time_weights(n, halflife=0.35):
@@ -128,6 +127,7 @@ class PerformanceMonitor:
     def __init__(self):
         self.batch_performances = []
         self.r2_records = []
+        self.folder = "model_results"
 
     def record_performance(self, test, pred):
         # Ensure pred is a DataFrame and rename the responder_6 column
@@ -154,11 +154,11 @@ class PerformanceMonitor:
     ):
         # Concatenate all batches into a single DataFrame
         performance_tracking_df = pl.concat(self.batch_performances)
-        performance_tracking_df.write_parquet(performance_path)
+        performance_tracking_df.write_parquet(f"{self.folder}/" + performance_path)
 
         # Create a DataFrame for R² records and write to a Parquet file
         r2_df = pl.DataFrame(self.r2_records)
-        r2_df.write_parquet(r2_path)
+        r2_df.write_parquet(f"{self.folder}/" + r2_path)
 
     @staticmethod
     def get_custom_r2(y_true, y_pred, weights=None):
@@ -168,40 +168,3 @@ class PerformanceMonitor:
         ss_res = np.sum(weights * (y_true - y_pred) ** 2)
         ss_tot = np.sum(weights * (y_true) ** 2)
         return 1 - ss_res / ss_tot
-
-
-class LinearCalculator(ABC):
-    @abstractmethod
-    def calculate(self, df):
-        raise NotImplementedError("Subclasses should implement this!")
-
-
-class LinearRegressionCalculator(LinearRegression):
-    def __init__(self):
-        super().__init__(fit_intercept=False)
-
-
-class LassoCalculator(LinearCalculator):
-    def __init__(self, alpha=1.0):
-        self.alpha = alpha
-
-    def calculate(self, df):
-        model = Lasso(alpha=self.alpha)
-        X = df.drop(columns=["target"])
-        y = df["target"]
-        model.fit(X, y)
-        df["lasso"] = model.predict(X)
-        return df
-
-
-class RidgeCalculator(LinearCalculator):
-    def __init__(self, alpha=1.0):
-        self.alpha = alpha
-
-    def calculate(self, df):
-        model = Ridge(alpha=self.alpha)
-        X = df.drop(columns=["target"])
-        y = df["target"]
-        model.fit(X, y)
-        df["ridge"] = model.predict(X)
-        return df
