@@ -233,7 +233,7 @@ class Predictor:
                 pred = self.predict(test, lags)
                 end_time = time.time()
                 duration = end_time - start_time
-                print(f"self.predict(test, lags) took {duration:.4f} seconds")
+                # print(f"self.predict(test, lags) took {duration:.4f} seconds")
 
                 # Record performance
                 performance_monitor.record_performance(test, pred)
@@ -290,7 +290,6 @@ class Predictor:
                     symbol_ids.append(symbol_id)
                     row_ids.append(batch["row_id"][-1])
 
-                # Extract the most recent date_id
                 tdate = test["date_id"][-1]
                 ttime = batch["time_id"][-1]
                 # Pass the cache history to the prediction model
@@ -303,9 +302,11 @@ class Predictor:
                 # )
 
                 self.model.fit(
-                    symbol_ids, self.cache_history, self.lag_cache, self.feature_cols
+                    symbol_ids,
+                    self.cache_history,
+                    self.lag_cache,
+                    self.feature_cols,
                 )
-
                 try:
                     estimates = self.model.get_estimates(
                         symbol_ids=symbol_ids,
@@ -355,7 +356,7 @@ if __name__ == "__main__":
     #     lt_window=15,
     # )
     # model = RidgeCalculator(alpha=2.0)
-    model = LassoCalculator(alpha=2.0)
+    model = LassoCalculator(alpha=1.0)
     preprocessor = Preprocessor(
         symbol_id=None,
         responder=6,
@@ -396,7 +397,7 @@ if __name__ == "__main__":
                 "feature_27",
                 "feature_31",
             },
-            synthetic_days=6,  # Pass synthetic_days parameter
+            synthetic_days=10,  # Pass synthetic_days parameter
         )
     elif KAGGLE_TEST:
         predictor = Predictor(

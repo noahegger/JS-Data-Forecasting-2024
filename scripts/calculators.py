@@ -26,8 +26,9 @@ class LinearRegressionCalculator(LinearRegression):
 
 
 class LassoCalculator:
-    def __init__(self, alpha=1.0):
+    def __init__(self, alpha=1.0, lb: int = 1):
         self.alpha = alpha
+        self.lb = lb
         self.models = {}
         self.median_calculator = MedianCalculator()
         self.missing = {}
@@ -72,6 +73,8 @@ class LassoCalculator:
 
                     # Fit the model for the current symbol_id
                     model = Lasso(alpha=self.alpha)
+                    # Join X,y and filter top 5% outliers by absolute value
+                    # Need corresponding y to also be filtered ... tricky
                     model.fit(X, y)
                     self.models[symbol_id] = model
 
@@ -79,8 +82,8 @@ class LassoCalculator:
         if symbol_id in self.models:
             return self.models[symbol_id].predict(X)
         else:
-            print(f"No model found for symbol_id {symbol_id}")
-            return 0
+            # print(f"No model found for symbol_id {symbol_id}")
+            return np.array([0], dtype=np.float32)
 
     def get_estimates(self, symbol_ids, test_data, feature_cols):
         estimates = []

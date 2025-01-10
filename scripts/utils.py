@@ -130,24 +130,29 @@ class PerformanceMonitor:
         self.folder = "model_results"
 
     def record_performance(self, test, pred):
-        # Ensure pred is a DataFrame and rename the responder_6 column
         pred = pred.rename({"responder_6": "responder_6_pred"})
-        # Add responder_6_pred column to test DataFrame
         merged_df = test.with_columns(pred["responder_6_pred"])
-        self.batch_performances.append(merged_df)
+        symbol_r2 = self.get_custom_id_r2(
+            merged_df["responder_6"].to_numpy(),
+            merged_df["responder_6_pred"].to_numpy(),
+        )
+        merged_df = merged_df.with_columns(pl.Series("symbol_r2", symbol_r2))
 
-        # Calculate custom R² score
         r2_score = self.get_custom_r2(
             merged_df["responder_6"].to_numpy(),
             merged_df["responder_6_pred"].to_numpy(),
             merged_df["weight"].to_numpy() if "weight" in merged_df.columns else None,
         )
-        print(f"Custom R² score: {r2_score}")
+        # print(f"Custom R² score: {r2_score}")
 
-        # Record date_id, time_id, and r2_score
+        if r2_score < -7.0:
+            print(f"Custom R² score: {r2_score}")
+            print(test["date_id"].unique()[0], test["time_id"].unique()[0])
+
         date_id = test["date_id"].unique()[0]
         time_id = test["time_id"].unique()[0]
         self.r2_records.append({"date_id": date_id, "time_id": time_id, "r2": r2_score})
+        self.batch_performances.append(merged_df)
 
     def save_results(
         self, performance_path="performance_tracking.parquet", r2_path="r2.parquet"
@@ -167,4 +172,13 @@ class PerformanceMonitor:
 
         ss_res = np.sum(weights * (y_true - y_pred) ** 2)
         ss_tot = np.sum(weights * (y_true) ** 2)
+        return 1 - ss_res / ss_tot
+
+    @staticmethod
+    def get_custom_id_r2(y_true, y_pred, weights=None):
+        if weights is None:
+            weights = np.ones_like(y_true)
+
+        ss_res = (y_true - y_pred) ** 2
+        ss_tot = (y_true) ** 2
         return 1 - ss_res / ss_tot

@@ -35,6 +35,8 @@ def apply_custom_style():
             "ytick.color": "#F8F8F2",
             "legend.framealpha": 0.9,
             "legend.edgecolor": "#44475A",
+            "legend.fontsize": 8,  # Smaller legend text
+            "legend.title_fontsize": 10,  # Smaller legend title
             "grid.color": "#F8F8F2",
             "grid.linestyle": "--",  # Changed gridlines to --
             "grid.linewidth": 0.7,
@@ -462,5 +464,61 @@ def plot_r2_time_series(r2_parquet_paths, start, end):
     plt.ylabel("R² Score")
     plt.title("R² Score Time Series")
     plt.legend(loc="upper left")
+    plt.grid(True)
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_per_symbol_r2(performance_paths, start, end):
+    plt.figure(figsize=(10, 6))
+
+    for performance_path in performance_paths:
+        # Read the performance data from the Parquet file
+        performance_df = pd.read_parquet(performance_path)
+        performance_df = performance_df[
+            (performance_df["date_id"] >= start) & (performance_df["date_id"] <= end)
+        ]
+
+        # Extract unique symbols
+        symbols = performance_df["symbol_id"].unique()
+
+        for symbol in symbols:
+            symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+            plt.plot(symbol_df.index, symbol_df["symbol_r2"], label=f"{symbol} R²")
+
+    plt.xlabel("Index")
+    plt.ylabel("Symbol R²")
+    plt.title("Symbol R² Time Series")
+    plt.legend(loc="upper left")
+    plt.grid(True)
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_per_symbol_cum_error(
+    performance_paths, start: int, end: int, symbols: Optional[list] = None
+):
+    plt.figure(figsize=(10, 6))
+
+    for performance_path in performance_paths:
+        # Read the performance data from the Parquet file
+        performance_df = pd.read_parquet(performance_path)
+        performance_df = performance_df[
+            (performance_df["date_id"] >= start) & (performance_df["date_id"] <= end)
+        ]
+
+        # Extract unique symbols
+        if not symbols:
+            symbols = performance_df["symbol_id"].unique().tolist()
+
+        for symbol in symbols:  # type: ignore
+            symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+            error = (symbol_df["responder_6"] - symbol_df["responder_6_pred"]).cumsum()
+            plt.plot(symbol_df.index, error, label=f"Symbol: {symbol} cum error")
+
+    plt.xlabel("Index")
+    plt.ylabel("Error")
+    plt.title("Symbol Error Time Series")
+    plt.legend(loc="lower left")
     plt.grid(True)
     plt.show()
