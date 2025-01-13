@@ -26,83 +26,135 @@ class LinearRegressionCalculator(LinearRegression):
 
 
 class LassoCalculator:
-    def __init__(self, alpha=1.0, lb: int = 1):
+    def __init__(
+        self,
+        alpha=1.0,
+        max_iter: int = 1000,
+        tol: float = 1e-4,
+        lb=1,
+        truncate_calculator=None,
+        intercept=False,
+    ):
         self.alpha = alpha
+        self.intercept = intercept
+        self.max_iter = max_iter
+        self.tol = tol
         self.lb = lb
         self.models = {}
         self.median_calculator = MedianCalculator()
+        self.feature_calculator = ZscoreCalculator()
+        self.truncate_calculator = truncate_calculator
         self.missing = {}
         self.name = f"Lasso_{alpha}"
+        self.valid_features = {}
 
-    def fit(self, symbol_ids, cache_history, lag_cache, feature_cols):
+    def fit(self, symbol_ids, test_data, cache_history, lag_cache, feature_cols):
         for symbol_id in symbol_ids:
             if symbol_id in lag_cache.cache and len(lag_cache.cache[symbol_id]) > 0:
-                # Get the most recent element of the lag_cache for y values
-                y_record = lag_cache.cache[symbol_id][-1]
-                y = y_record.get_feature_series("responder_6_lag_1").to_numpy().ravel()
+                # Get current features and find intersection with availale
+                symbol_data = test_data.filter(pl.col("symbol_id") == symbol_id)
+                present_features = [
+                    col
+                    for col in symbol_data.columns
+                    if "feature" in col and not symbol_data[col].is_null().any()
+                ]
 
-                # Get the second most recent element of the cache_history for X values
-                if len(cache_history.cache[symbol_id]) > 1:
-                    x_record = cache_history.cache[symbol_id][-2]
-                    X = x_record.data.select(feature_cols).to_numpy()
+                # Features we were given and also willing to use
+                intersected_features = list(set(feature_cols) & set(present_features))
+                # Determine the lookback period based on the minimum length of lag_cache and cache_history
+                lookback = min(
+                    self.lb,
+                    len(lag_cache.cache[symbol_id]),
+                    len(cache_history.cache[symbol_id]) + 1,
+                )
+
+                # Get the most recent elements of the lag_cache for y values
+                y_records = list(lag_cache.cache[symbol_id])[-lookback:]
+                y = np.concatenate(
+                    [
+                        record.get_feature_series("responder_6_lag_1")
+                        .to_numpy()
+                        .ravel()
+                        for record in y_records
+                    ]
+                )
+
+                # Get the corresponding elements of the cache_history for X values
+                if len(cache_history.cache[symbol_id]) > lookback:
+                    x_records = list(cache_history.cache[symbol_id])[-lookback - 1 : -1]
+                    X = np.concatenate(
+                        [
+                            record.data.select(intersected_features).to_numpy()
+                            for record in x_records
+                        ],
+                        axis=0,
+                    )
 
                     # Calculate medians and impute NaNs
-                    self.median_calculator.calculate_medians(
-                        x_record.data, feature_cols
-                    )
-                    X = self.median_calculator.impute(X, feature_cols)
+                    self.median_calculator.calculate_medians(X, intersected_features)
+                    X = self.median_calculator.impute(X, intersected_features)
 
-                    # Identify and store features that are entirely NaN
+                    # Apply feature transformations : USE Z-SCORES
+                    if self.truncate_calculator:
+                        X, y = self.truncate_calculator.truncate(X, y)
+
+                    # Apply feature transformations: Transform to z-scores
+                    X = self.feature_calculator.transform(X, intersected_features)
+
+                    # Identify and store features that are entirely NaN in past data
                     self.missing[symbol_id] = []
-                    for i, col in enumerate(feature_cols):
+                    for i, col in enumerate(intersected_features):
                         if np.isnan(self.median_calculator.medians[col]):
                             self.missing[symbol_id].append(col)
 
-                    # Remove entirely NaN features from X and feature_cols
-                    valid_features = [
-                        col
-                        for col in feature_cols
-                        if col not in self.missing[symbol_id]
-                    ]
+                    # Remove entirely NaN features from fitting data and store info
                     valid_indices = [
                         i
-                        for i, col in enumerate(feature_cols)
+                        for i, col in enumerate(intersected_features)
                         if col not in self.missing[symbol_id]
                     ]
+                    valid_features = [
+                        col
+                        for col in intersected_features
+                        if col not in self.missing[symbol_id]
+                    ]
+                    self.valid_features[symbol_id] = valid_features
                     X = X[:, valid_indices]
 
                     # Fit the model for the current symbol_id
-                    model = Lasso(alpha=self.alpha)
-                    # Join X,y and filter top 5% outliers by absolute value
-                    # Need corresponding y to also be filtered ... tricky
+                    model = Lasso(
+                        alpha=self.alpha,
+                        fit_intercept=self.intercept,
+                        max_iter=self.max_iter,
+                        tol=self.tol,
+                    )
                     model.fit(X, y)
+                    print("Model Coefficients:", model.coef_)
                     self.models[symbol_id] = model
 
     def predict(self, symbol_id, X):
-        if symbol_id in self.models:
-            return self.models[symbol_id].predict(X)
-        else:
-            # print(f"No model found for symbol_id {symbol_id}")
-            return np.array([0], dtype=np.float32)
+        pred = self.models[symbol_id].predict(X)
+        pred = np.clip(pred, -5, 5)
+        return pred
 
     def get_estimates(self, symbol_ids, test_data, feature_cols):
         estimates = []
         for symbol_id in symbol_ids:
             symbol_data = test_data.filter(pl.col("symbol_id") == symbol_id)
-            valid_features = [
-                col
-                for col in feature_cols
-                if col not in self.missing.get(symbol_id, [])
-            ]
-            X = symbol_data.select(valid_features).to_numpy()
 
-            # Impute NaNs with medians
-            X = self.median_calculator.impute(X, valid_features)
+            if symbol_id in self.models:
+                X = (
+                    symbol_data.select(self.valid_features[symbol_id])
+                    .to_numpy()
+                    .astype(np.float32)
+                )
+                X = self.feature_calculator.transform_single_record(
+                    X, self.valid_features[symbol_id]
+                )
 
-            # Predict and clip estimates
-            pred = self.predict(symbol_id, X)
-            pred = np.clip(pred, -5, 5)
-
+                pred = self.predict(symbol_id, X)
+            else:
+                pred = np.array([0], dtype=np.float32)
             estimates.append(pred)
         return np.concatenate(estimates)
 
@@ -186,10 +238,10 @@ class MedianCalculator:
     def __init__(self):
         self.medians = {}
 
-    def calculate_medians(self, data: pl.DataFrame, feature_cols: list):
-        for col in feature_cols:
-            median_value = data[col].median()
-            self.medians[col] = median_value if median_value else np.nan
+    def calculate_medians(self, data: np.ndarray, feature_cols: list):
+        for i, col in enumerate(feature_cols):
+            median_value = np.nanmedian(data[:, i])
+            self.medians[col] = median_value if not np.isnan(median_value) else np.nan
 
     def impute(self, data: np.ndarray, feature_cols: list):
         for i, col in enumerate(feature_cols):
@@ -198,6 +250,41 @@ class MedianCalculator:
                     np.isnan(data[:, i]), self.medians[col], data[:, i]
                 )
         return data
+
+
+class ZscoreCalculator:
+    def __init__(self):
+        self.means = {}
+        self.stds = {}
+
+    def transform(self, data: np.ndarray, feature_cols: list):
+        for i, col in enumerate(feature_cols):
+            mean = np.nanmean(data[:, i])
+            std = np.nanstd(data[:, i])
+            self.means[col] = mean
+            self.stds[col] = std
+            data[:, i] = (data[:, i] - mean) / std if std != 0 else 0
+        return data
+
+    def transform_single_record(self, data: np.ndarray, feature_cols: list):
+        z_scores = np.zeros_like(data)
+        for i, col in enumerate(feature_cols):
+            mean = self.means[col]
+            std = self.stds[col]
+            z_scores[:, i] = (data[:, i] - mean) / std if std != 0 else 0
+        return z_scores
+
+
+class TruncateCalculator:
+    def __init__(self, lower_percentile=2.5, upper_percentile=97.5):
+        self.lower_percentile = lower_percentile
+        self.upper_percentile = upper_percentile
+
+    def truncate(self, X, y):
+        lower_bound = np.percentile(X, self.lower_percentile, axis=0)
+        upper_bound = np.percentile(X, self.upper_percentile, axis=0)
+        mask = np.all((X >= lower_bound) & (X <= upper_bound), axis=1)
+        return X[mask], y[mask]
 
 
 class MovingAverageCalculator(Calculator):
@@ -229,7 +316,7 @@ class ExpWeightedMeanCalculator(Calculator):
         if self.replace:
             values = [0 if pd.isna(m) else m for m in values]
 
-        res = utils.time_weighted_mean(values, self.lookback, self.halflife)
+        res = utils.time_weighted_mean(values, self.halflife)
         return res
 
 

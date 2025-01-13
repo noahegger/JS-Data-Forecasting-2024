@@ -2,9 +2,12 @@ from typing import Optional
 
 import calculators as calculators
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import polars as pl
+import scipy.stats as stats
 import seaborn as sns
+import statsmodels.api as sm
 import utils as utils
 from calculators import ExpWeightedMeanCalculator
 from cycler import cycler
@@ -522,3 +525,839 @@ def plot_per_symbol_cum_error(
     plt.legend(loc="lower left")
     plt.grid(True)
     plt.show()
+
+
+@apply_custom_style_decorator
+def plot_feature_time_series(
+    performance_path, start: int, end: int, symbol: int, period: int, features: list
+):
+    plt.figure(figsize=(10, 6))
+
+    performance_df = pd.read_parquet(performance_path)
+    performance_df = performance_df[
+        (performance_df["date_id"] >= start) & (performance_df["date_id"] <= end)
+    ]
+
+    symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+    symbol_df = symbol_df.reset_index(drop=True)
+
+    for feature in features:
+
+        rolling_sum = symbol_df[feature].rolling(20).sum()
+
+        plt.plot(
+            symbol_df.index,
+            # rolling_sum * symbol_df[feature].apply(np.sign).rolling(20).mean(),
+            symbol_df[feature].apply(np.sign).rolling(period).mean()
+            * symbol_df[feature]
+            .rolling(period)
+            .std(),  # - feature.rolling(period).mean(),
+            # .rolling(5).mean(),
+            # rolling_sum,  # - symbol_df[feature].shift(20),  # .rolling(20).sum(),
+            label=f"{feature}",
+        )
+
+    plt.plot(symbol_df.index, symbol_df["responder_6"], label="responder_6")
+
+    plt.xlabel("Index")
+    plt.ylabel("Error")
+    plt.title(f"Symbol: {symbol} Feature Time Series")
+    plt.legend(loc="lower left")
+    plt.grid(True)
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_cross_feature_time_series(
+    performance_path, start: int, end: int, symbol: int, feature1: str, feature2: str
+):
+    plt.figure(figsize=(10, 6))
+
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+    performance_df = performance_df[
+        (performance_df["date_id"] >= start) & (performance_df["date_id"] <= end)
+    ]
+
+    # Filter the DataFrame for the given symbol
+    symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+    symbol_df = symbol_df.reset_index(drop=True)
+
+    # Plot the multiplication of the two features
+    plt.plot(
+        symbol_df.index,
+        symbol_df[feature1] * symbol_df[feature2],
+        label=f"{feature1} * {feature2}",
+    )
+
+    # Plot responder_6
+    plt.plot(symbol_df.index, symbol_df["responder_6"], label="responder_6")
+
+    plt.xlabel("Index")
+    plt.ylabel("Value")
+    plt.title(
+        f"Time Series of {feature1} * {feature2} and responder_6 for Symbol {symbol}"
+    )
+    plt.legend(loc="upper left")
+    plt.grid(True)
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_feature_histograms(performance_path, symbol, features):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    # Filter the DataFrame for the given symbol
+    symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+    # Select the first 25 features
+    selected_features = features[:25]
+
+    # Create a 5x5 grid of histograms
+    fig, axes = plt.subplots(5, 5, figsize=(12, 8))
+    axes = axes.flatten()
+
+    for i, feature in enumerate(selected_features):
+        if feature in symbol_df.columns:
+            axes[i].hist(symbol_df[feature].dropna(), bins=30, edgecolor="black")
+            axes[i].set_title(feature)
+            axes[i].set_xlabel("Value")
+            axes[i].set_ylabel("Frequency")
+        else:
+            axes[i].set_visible(False)
+
+    plt.tight_layout()
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_true_vs_pred(performance_path, start: int, end: int, symbol: int):
+    plt.figure(figsize=(10, 6))
+
+    performance_df = pd.read_parquet(performance_path)
+    performance_df = performance_df[
+        (performance_df["date_id"] >= start) & (performance_df["date_id"] <= end)
+    ]
+
+    symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+    symbol_df = symbol_df.reset_index(drop=True)
+
+    plt.plot(symbol_df.index, symbol_df["responder_6"], label=f"True responder_6")
+    plt.plot(symbol_df.index, symbol_df["responder_6_pred"], label=f"Pred responder_6")
+
+    plt.xlabel("Index")
+    plt.ylabel("Error")
+    plt.title(f"Symbol: {symbol} Prediction Time Series")
+    plt.legend(loc="upper left")
+    plt.grid(True)
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_responder_6_per_day(performance_path, start: int, end: int, symbol: int):
+    plt.figure(figsize=(10, 6))
+
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    # Filter the DataFrame for the given symbol
+    symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+    # Loop through each day between start and end
+    for date_id in range(start, end + 1):
+        # Filter the DataFrame for the current date
+        date_df = symbol_df[symbol_df["date_id"] == date_id]
+
+        # Reset the index so it starts at 0
+        date_df = date_df.reset_index(drop=True)
+
+        # Plot the "responder_6" column
+        plt.plot(date_df.index, date_df["responder_6"], label=f"Date {date_id}")
+
+    plt.xlabel("Index")
+    plt.ylabel("Responder 6")
+    plt.title(f"Responder 6 Time Series for Symbol {symbol}")
+    plt.legend(loc="upper left")
+    plt.grid(True)
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_day_comparison(performance_path, day1: int, day2: int, symbol: int):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    # Filter the DataFrame for the given symbol
+    symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+    # Filter the DataFrame for the two distinct days
+    day1_df = symbol_df[symbol_df["date_id"] == day1].reset_index(drop=True)
+    day2_df = symbol_df[symbol_df["date_id"] == day2].reset_index(drop=True)
+
+    # Calculate the correlation between day1 and day2 responder_6
+    min_length = min(len(day1_df), len(day2_df))
+    correlation = (
+        day1_df["responder_6"]
+        .iloc[:min_length]
+        .corr(day2_df["responder_6"].iloc[:min_length], method="pearson")
+    )
+
+    # Create subplots
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8))
+
+    # Top plot: responder_6 per day
+    axes[0].plot(day1_df.index, day1_df["responder_6"], label=f"Day {day1} responder_6")
+    axes[0].plot(day2_df.index, day2_df["responder_6"], label=f"Day {day2} responder_6")
+    axes[0].plot(
+        day2_df.index,
+        day2_df["responder_6_pred"],
+        label=f"Day {day2} responder_6_pred",
+        linestyle="--",
+    )
+    average_day1_day2_pred = (day1_df["responder_6"] + day2_df["responder_6_pred"]) / 2
+    axes[0].plot(
+        day1_df.index,
+        average_day1_day2_pred,
+        label=f"Average Day {day1} responder_6 and Day {day2} responder_6_pred",
+        linestyle=":",
+    )
+    axes[0].set_xlabel("Index")
+    axes[0].set_ylabel("Responder 6")
+    axes[0].set_title(f"Responder 6 Time Series for Symbol {symbol}")
+    axes[0].legend(loc="upper left", title=f"Correlation: {correlation:.2f}")
+    axes[0].grid(True)
+
+    # Middle plot: difference between the day_df's responder_6 values
+    difference = (
+        day1_df["responder_6"].iloc[:min_length]
+        - day2_df["responder_6"].iloc[:min_length]
+    )
+    axes[1].plot(
+        difference.index,
+        difference,
+        label=f"Difference between Day {day1} and Day {day2}",
+    )
+    axes[1].plot(
+        day2_df.index,
+        day2_df["responder_6_pred"],
+        label=f"Day {day2} responder_6_pred",
+        linestyle="--",
+    )
+    axes[1].set_xlabel("Index")
+    axes[1].set_ylabel("Difference in Responder 6")
+    axes[1].set_title(f"Difference in Responder 6 for Symbol {symbol}")
+    axes[1].legend(loc="upper left")
+    axes[1].grid(True)
+
+    # Bottom plot: cumulative sums
+    cumsum_responder6_pred = (
+        day2_df["responder_6"] - day2_df["responder_6_pred"]
+    ).cumsum()
+    cumsum_responder6_day1 = (day2_df["responder_6"] - day1_df["responder_6"]).cumsum()
+    cumsum_responder6_avg = (day2_df["responder_6"] - average_day1_day2_pred).cumsum()
+    axes[2].plot(
+        cumsum_responder6_pred.index,
+        cumsum_responder6_pred,
+        label=f"Cumsum of (Day {day2} responder_6 - Day {day2} responder_6_pred)",
+    )
+    axes[2].plot(
+        cumsum_responder6_day1.index,
+        cumsum_responder6_day1,
+        label=f"Cumsum of (Day {day2} responder_6 - Day {day1} responder_6)",
+    )
+    axes[2].plot(
+        cumsum_responder6_avg.index,
+        cumsum_responder6_avg,
+        label=f"Cumsum of (Day {day2} responder_6 - Average Day {day1} responder_6 and Day {day2} responder_6_pred)",
+    )
+    axes[2].set_xlabel("Index")
+    axes[2].set_ylabel("Cumulative Sum")
+    axes[2].set_title(f"Cumulative Sum of Differences for Symbol {symbol}")
+    axes[2].legend(loc="upper left")
+    axes[2].grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_feature_vs_responder_6_scatter(
+    performance_path, day: int, symbol: int, features: list, transform=None
+):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    # Filter the DataFrame for the given symbol and day
+    symbol_df = performance_df[
+        (performance_df["symbol_id"] == symbol) & (performance_df["date_id"] == day)
+    ]
+
+    # Select the first 9 features
+    selected_features = features[:9]
+
+    # Create a 3x3 grid of scatterplots
+    fig, axes = plt.subplots(3, 3, figsize=(10, 10))
+    axes = axes.flatten()
+
+    for i, feature in enumerate(selected_features):
+        if feature in symbol_df.columns:
+            combined_df = symbol_df[[feature, "responder_6"]].copy()
+            combined_df = combined_df.dropna()
+            feature_values = combined_df[feature]
+            responder_6_values = combined_df["responder_6"]
+
+            if transform == "std":
+                feature_values = feature_values.rolling(window=20).std()
+            elif transform == "mean":
+                feature_values = feature_values.rolling(window=20).mean()
+            elif transform == "sign":
+                feature_values = (
+                    feature_values.apply(np.sign).rolling(window=20).mean()
+                ) * feature_values.rolling(window=20).std()
+
+            feature_values = feature_values.dropna()
+            responder_6_values = responder_6_values.loc[feature_values.index]
+
+            axes[i].scatter(
+                feature_values,
+                responder_6_values,
+                edgecolor="black",
+            )
+            axes[i].set_title(f"{feature} ({transform}) vs. responder_6")
+            axes[i].set_xlabel(feature)
+            axes[i].set_ylabel("responder_6")
+        else:
+            axes[i].set_visible(False)
+
+    plt.tight_layout()
+    plt.show()
+
+
+@apply_custom_style_decorator
+def plot_acf_subplots(
+    performance_path, start: int, end: int, symbol: int, features: list
+):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    # Filter the DataFrame for the given symbol and date range
+    symbol_df = performance_df[
+        (performance_df["symbol_id"] == symbol)
+        & (performance_df["date_id"] >= start)
+        & (performance_df["date_id"] <= end)
+    ].reset_index(drop=True)
+
+    # Select the first 2 features
+    selected_features = features[:2]
+
+    # Create subplots
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8))
+
+    # Plot ACF for responder_6
+    sm.graphics.tsa.plot_acf(
+        symbol_df["responder_6"].dropna(), ax=axes[0], title="ACF of responder_6"
+    )
+
+    # Plot ACF for the first feature
+    if selected_features[0] in symbol_df.columns:
+        sm.graphics.tsa.plot_acf(
+            symbol_df[selected_features[0]].dropna(),
+            ax=axes[1],
+            title=f"ACF of {selected_features[0]}",
+        )
+
+    # Plot ACF for the second feature
+    if len(selected_features) > 1 and selected_features[1] in symbol_df.columns:
+        sm.graphics.tsa.plot_acf(
+            symbol_df[selected_features[1]].dropna(),
+            ax=axes[2],
+            title=f"ACF of {selected_features[1]}",
+        )
+
+    plt.tight_layout()
+    plt.show()
+
+
+def grid_search_correlations(
+    performance_path, symbols, features, start, end, plot_matrix=False
+):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    results = []
+
+    for symbol in symbols:
+        # Filter the DataFrame for the given symbol
+        symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+        # Filter the DataFrame for the given date range
+        symbol_df = symbol_df[
+            (symbol_df["date_id"] >= start) & (symbol_df["date_id"] <= end)
+        ]
+
+        symbol_results = []
+
+        for feature in features:
+            if feature in symbol_df.columns:
+                rolling_features = {}
+                for period in range(5, 21):
+                    # Compute rolling mean, rolling std, and absolute mean sign
+                    rolling_features[f"{feature}_rolling_mean_{period}"] = (
+                        symbol_df[feature].rolling(window=period).mean()
+                    )
+                    rolling_features[f"{feature}_rolling_std_{period}"] = (
+                        symbol_df[feature].rolling(window=period).std()
+                    )
+                    rolling_features[f"{feature}_abs_mean_sign_{period}"] = (
+                        symbol_df[feature]
+                        .apply(lambda x: 1 if x > 0 else -1)
+                        .rolling(window=period)
+                        .mean()
+                        .abs()
+                    )
+
+                # Concatenate all rolling features to the DataFrame at once
+                rolling_df = pd.concat(rolling_features, axis=1)
+                symbol_df = pd.concat([symbol_df, rolling_df], axis=1)
+
+                for period in range(5, 21):
+                    # Compute correlation with responder_6
+                    rolling_mean_corr = symbol_df[
+                        f"{feature}_rolling_mean_{period}"
+                    ].corr(symbol_df["responder_6"])
+                    rolling_std_corr = symbol_df[
+                        f"{feature}_rolling_std_{period}"
+                    ].corr(symbol_df["responder_6"])
+                    abs_mean_sign_corr = symbol_df[
+                        f"{feature}_abs_mean_sign_{period}"
+                    ].corr(symbol_df["responder_6"])
+
+                    # Store the results
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_rolling_mean_{period}",
+                            "correlation": rolling_mean_corr,
+                        }
+                    )
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_rolling_std_{period}",
+                            "correlation": rolling_std_corr,
+                        }
+                    )
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_abs_mean_sign_{period}",
+                            "correlation": abs_mean_sign_corr,
+                        }
+                    )
+
+        # Sort by the absolute value of the correlation and select the top 30
+        top_features = sorted(
+            symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
+        )
+
+        # Ensure only one mean, one std, or one abs mean sign feature per feature is chosen
+        chosen_features = {}
+        final_top_features = []
+        for result in top_features:
+            base_feature = result["feature"].rsplit("_", 2)[0]
+            if base_feature not in chosen_features:
+                chosen_features[base_feature] = result["feature"]
+                final_top_features.append(result)
+            if len(final_top_features) == 30:
+                break
+
+        # Print the results
+        print(f"Symbol: {symbol}")
+        print(f"{'Feature':<30} | {'Correlation':<10}")
+        for result in final_top_features:
+            print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
+
+        results.extend(final_top_features)
+
+        if plot_matrix:
+            # Extract the top 20 features for the correlation matrix
+            top_20_features = [result["feature"] for result in final_top_features[:20]]
+            top_20_df = symbol_df[top_20_features]
+
+            # Plot the correlation matrix
+            plt.figure(figsize=(12, 10))
+            corr_matrix = top_20_df.corr()
+            sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", cbar=True)
+            plt.title(f"Correlation Matrix for Top 20 Features - Symbol {symbol}")
+            plt.tight_layout(pad=2.0)  # Adjust padding to create bigger margins
+            plt.show()
+
+    return pd.DataFrame(results)
+
+
+def grid_search_correlations_scaled(
+    performance_path,
+    symbols,
+    features,
+    start,
+    end,
+    cross_with="mean",
+    plot_matrix=False,
+):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    results = []
+
+    for symbol in symbols:
+        # Filter the DataFrame for the given symbol
+        symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+        # Filter the DataFrame for the given date range
+        symbol_df = symbol_df[
+            (symbol_df["date_id"] >= start) & (symbol_df["date_id"] <= end)
+        ]
+
+        symbol_results = []
+
+        for feature in features:
+            if feature in symbol_df.columns:
+                rolling_features = {}
+                for period in range(5, 21):
+                    # Compute rolling mean, rolling std, and absolute mean sign
+                    rolling_mean = symbol_df[feature].rolling(window=period).mean()
+                    rolling_std = symbol_df[feature].rolling(window=period).std()
+                    rolling_med = symbol_df[feature].rolling(window=period).median()
+                    mean_sign = (
+                        symbol_df[feature].apply(np.sign).rolling(window=period).mean()
+                    )
+
+                    if cross_with == "mean":
+                        scaled_feature = mean_sign * rolling_mean
+                    elif cross_with == "std":
+                        scaled_feature = mean_sign * rolling_std
+                    elif cross_with == "self":
+                        scaled_feature = mean_sign * symbol_df[feature]
+                    elif cross_with == "median":
+                        scaled_feature = mean_sign * rolling_med
+
+                    rolling_features[f"{feature}_scaled_{cross_with}_{period}"] = (
+                        scaled_feature
+                    )
+
+                # Concatenate all rolling features to the DataFrame at once
+                rolling_df = pd.concat(rolling_features, axis=1)
+                symbol_df = pd.concat([symbol_df, rolling_df], axis=1)
+
+                for period in range(5, 21):
+                    # Compute correlation with responder_6
+                    scaled_corr = symbol_df[
+                        f"{feature}_scaled_{cross_with}_{period}"
+                    ].corr(symbol_df["responder_6"])
+
+                    # Store the results
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_scaled_{cross_with}_{period}",
+                            "correlation": scaled_corr,
+                        }
+                    )
+
+        # Sort by the absolute value of the correlation and select the top 30
+        top_features = sorted(
+            symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
+        )
+
+        # Ensure only one scaled feature per feature is chosen
+        chosen_features = {}
+        final_top_features = []
+        for result in top_features:
+            base_feature = result["feature"].rsplit("_", 3)[0]
+            if base_feature not in chosen_features:
+                chosen_features[base_feature] = result["feature"]
+                final_top_features.append(result)
+            if len(final_top_features) == 30:
+                break
+
+        # Print the results
+        print(f"Symbol: {symbol}")
+        print(f"{'Feature':<30} | {'Correlation':<10}")
+        for result in final_top_features:
+            print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
+
+        results.extend(final_top_features)
+
+        if plot_matrix:
+            # Extract the top 20 features for the correlation matrix
+            top_20_features = [result["feature"] for result in final_top_features[:20]]
+            top_20_df = symbol_df[top_20_features]
+
+            # Plot the correlation matrix
+            plt.figure(figsize=(12, 10))
+            corr_matrix = top_20_df.corr()
+            sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", cbar=True)
+            plt.title(f"Correlation Matrix for Top 20 Features - Symbol {symbol}")
+            plt.tight_layout(pad=2.0)  # Adjust padding to create bigger margins
+            plt.show()
+
+    return pd.DataFrame(results)
+
+
+def grid_search_feature_interactions(performance_path, symbols, features, start, end):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    results = []
+
+    for symbol in symbols:
+        # Filter the DataFrame for the given symbol
+        symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+        # Filter the DataFrame for the given date range
+        symbol_df = symbol_df[
+            (symbol_df["date_id"] >= start) & (symbol_df["date_id"] <= end)
+        ]
+
+        symbol_results = []
+
+        for i, feature1 in enumerate(features):
+            if feature1 in symbol_df.columns:
+                for feature2 in features[i + 1 :]:
+                    if feature2 in symbol_df.columns:
+                        # Calculate interaction terms
+                        interaction_product = symbol_df[feature1] * symbol_df[feature2]
+                        interaction_division = symbol_df[feature1] / symbol_df[feature2]
+
+                        # Compute correlation with responder_6
+                        product_corr = interaction_product.corr(
+                            symbol_df["responder_6"]
+                        )
+                        division_corr = interaction_division.corr(
+                            symbol_df["responder_6"]
+                        )
+
+                        # Store the results
+                        symbol_results.append(
+                            {
+                                "symbol": symbol,
+                                "feature": f"{feature1} * {feature2}",
+                                "correlation": product_corr,
+                            }
+                        )
+                        symbol_results.append(
+                            {
+                                "symbol": symbol,
+                                "feature": f"{feature1} / {feature2}",
+                                "correlation": division_corr,
+                            }
+                        )
+
+        # Sort by the absolute value of the correlation and select the top 20
+        top_features = sorted(
+            symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
+        )[:20]
+
+        # Print the results
+        print(f"Symbol: {symbol}")
+        print(f"{'Feature':<30} | {'Correlation':<10}")
+        for result in top_features:
+            print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
+
+        results.extend(top_features)
+
+    return pd.DataFrame(results)
+
+
+def grid_search_rolling_sum(performance_path, symbols, features, start, end):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    results = []
+
+    for symbol in symbols:
+        # Filter the DataFrame for the given symbol
+        symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+        # Filter the DataFrame for the given date range
+        symbol_df = symbol_df[
+            (symbol_df["date_id"] >= start) & (symbol_df["date_id"] <= end)
+        ]
+
+        symbol_results = []
+
+        for feature in features:
+            if feature in symbol_df.columns:
+                rolling_features = {}
+                for period in range(5, 21):
+                    # Compute rolling sum
+                    rolling_sum = symbol_df[feature].rolling(window=period).sum()
+                    rolling_features[f"{feature}_rolling_sum_{period}"] = rolling_sum
+
+                # Concatenate all rolling features to the DataFrame at once
+                rolling_df = pd.concat(rolling_features, axis=1)
+                symbol_df = pd.concat([symbol_df, rolling_df], axis=1)
+
+                for period in range(5, 21):
+                    # Compute correlation with responder_6
+                    rolling_sum_corr = symbol_df[
+                        f"{feature}_rolling_sum_{period}"
+                    ].corr(symbol_df["responder_6"])
+
+                    # Store the results
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_rolling_sum_{period}",
+                            "correlation": rolling_sum_corr,
+                        }
+                    )
+
+        # Sort by the absolute value of the correlation and select the top 30
+        top_features = sorted(
+            symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
+        )[:30]
+
+        # Print the results
+        print(f"Symbol: {symbol}")
+        print(f"{'Feature':<30} | {'Correlation':<10}")
+        for result in top_features:
+            print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
+
+        results.extend(top_features)
+
+    return pd.DataFrame(results)
+
+
+def grid_search_differences(performance_path, symbols, features, start, end):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    results = []
+
+    for symbol in symbols:
+        # Filter the DataFrame for the given symbol
+        symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+        # Filter the DataFrame for the given date range
+        symbol_df = symbol_df[
+            (symbol_df["date_id"] >= start) & (symbol_df["date_id"] <= end)
+        ]
+
+        symbol_results = []
+
+        for feature in features:
+            if feature in symbol_df.columns:
+                difference_features = {}
+                for period in range(5, 21):
+                    # Compute differences
+                    difference = symbol_df[feature] - symbol_df[feature].shift(period)
+                    difference_features[f"{feature}_difference_{period}"] = difference
+
+                # Concatenate all difference features to the DataFrame at once
+                difference_df = pd.concat(difference_features, axis=1)
+                symbol_df = pd.concat([symbol_df, difference_df], axis=1)
+
+                for period in range(5, 21):
+                    # Compute correlation with responder_6
+                    difference_corr = symbol_df[f"{feature}_difference_{period}"].corr(
+                        symbol_df["responder_6"]
+                    )
+
+                    # Store the results
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_difference_{period}",
+                            "correlation": difference_corr,
+                        }
+                    )
+
+        # Sort by the absolute value of the correlation and select the top 30
+        top_features = sorted(
+            symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
+        )[:30]
+
+        # Print the results
+        print(f"Symbol: {symbol}")
+        print(f"{'Feature':<30} | {'Correlation':<10}")
+        for result in top_features:
+            print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
+
+        results.extend(top_features)
+
+    return pd.DataFrame(results)
+
+
+def grid_search_rolling_sum_scaled_sign(
+    performance_path, symbols, features, start, end
+):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    results = []
+
+    for symbol in symbols:
+        # Filter the DataFrame for the given symbol
+        symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+        # Filter the DataFrame for the given date range
+        symbol_df = symbol_df[
+            (symbol_df["date_id"] >= start) & (symbol_df["date_id"] <= end)
+        ]
+
+        symbol_results = []
+
+        for feature in features:
+            if feature in symbol_df.columns:
+                rolling_features = {}
+                for period in range(5, 21):
+                    # Compute rolling sum and absolute mean sign
+                    rolling_sum = symbol_df[feature].rolling(window=period).sum()
+                    abs_mean_sign = (
+                        symbol_df[feature]
+                        .apply(lambda x: 1 if x > 0 else -1)
+                        .rolling(window=period)
+                        .mean()
+                        .abs()
+                    )
+                    scaled_rolling_sum = rolling_sum * abs_mean_sign
+
+                    rolling_features[f"{feature}_rolling_sum_scaled_sign_{period}"] = (
+                        scaled_rolling_sum
+                    )
+
+                # Concatenate all rolling features to the DataFrame at once
+                rolling_df = pd.concat(rolling_features, axis=1)
+                symbol_df = pd.concat([symbol_df, rolling_df], axis=1)
+
+                for period in range(5, 21):
+                    # Compute correlation with responder_6
+                    scaled_rolling_sum_corr = symbol_df[
+                        f"{feature}_rolling_sum_scaled_sign_{period}"
+                    ].corr(symbol_df["responder_6"])
+
+                    # Store the results
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_rolling_sum_scaled_sign_{period}",
+                            "correlation": scaled_rolling_sum_corr,
+                        }
+                    )
+
+        # Sort by the absolute value of the correlation and select the top 30
+        top_features = sorted(
+            symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
+        )[:30]
+
+        # Print the results
+        print(f"Symbol: {symbol}")
+        print(f"{'Feature':<30} | {'Correlation':<10}")
+        for result in top_features:
+            print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
+
+        results.extend(top_features)
+
+    return pd.DataFrame(results)

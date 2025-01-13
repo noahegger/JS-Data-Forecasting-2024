@@ -11,7 +11,8 @@ def get_time_weights(n, halflife=0.35):
     return weights
 
 
-def time_weighted_mean(vals, n, halflife=0.35):
+def time_weighted_mean(vals, halflife=0.35):
+    n = len(vals)
     weights = get_time_weights(n, halflife)
     return np.dot(vals, weights[::-1])
 
@@ -143,11 +144,7 @@ class PerformanceMonitor:
             merged_df["responder_6_pred"].to_numpy(),
             merged_df["weight"].to_numpy() if "weight" in merged_df.columns else None,
         )
-        # print(f"Custom R² score: {r2_score}")
-
-        if r2_score < -7.0:
-            print(f"Custom R² score: {r2_score}")
-            print(test["date_id"].unique()[0], test["time_id"].unique()[0])
+        print(f"Custom R² score: {r2_score}")
 
         date_id = test["date_id"].unique()[0]
         time_id = test["time_id"].unique()[0]

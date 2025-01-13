@@ -28,10 +28,12 @@ from calculators import (
     MovingAverageCalculator,
     RevDecayCalculator,
     RidgeCalculator,
+    TruncateCalculator,
 )
 from data_preprocessing import Preprocessor
-from models import BaseModel, EnsembleTimeSeriesV1
-from record import Cache, SymbolRecord
+from models import BaseModel, EnsembleTimeSeriesV1, LinearRankedCorrelation
+from record import Cache, CorrelationCache, SymbolRecord
+from sklearn.linear_model import Lasso
 from utils import PerformanceMonitor
 
 
@@ -44,7 +46,8 @@ class Predictor:
         test_parquet: Optional[str] = None,
         lag_parquet: Optional[str] = None,
         cache_lb_days: int = 5,
-        cache_freq: int = 15,
+        cache_freq: int = 1,
+        smoothing_period: int = 20,
         test: bool = False,
         partition_ids: Optional[List[int]] = None,
         exclude_set: Optional[set] = None,
@@ -59,8 +62,18 @@ class Predictor:
         self.lag_parquet = str(lag_parquet) if lag_parquet else ""
         self.cache_lb_days = cache_lb_days
         self.cache_freq = cache_freq
-        self.cache_history = Cache(maxlen=self.cache_lb_days, freq=self.cache_freq)
-        self.lag_cache = Cache(maxlen=self.cache_lb_days, freq=self.cache_freq)
+        self.smoothing_period = smoothing_period
+        self.cache_history = Cache(
+            maxlen=self.cache_lb_days + 1,
+            smoothing_period=self.smoothing_period,
+            freq=self.cache_freq,
+        )  # needed for alignment of resp, feature since lag offset by 1
+        self.lag_cache = Cache(
+            maxlen=self.cache_lb_days,
+            smoothing_period=self.smoothing_period,
+            freq=self.cache_freq,
+        )
+        self.corr_cache = CorrelationCache(maxlen=self.cache_lb_days)
         self.test_ = None
         self.time_step_count = 0
         self.test = test
@@ -101,6 +114,11 @@ class Predictor:
             for i in (self.partition_ids or range(10))
         ]
         train_data = pl.concat([pl.read_parquet(parquet) for parquet in train_parquets])
+        # Normalize date_id to start from 0
+        min_date_id = train_data["date_id"].min()
+        train_data = train_data.with_columns(
+            (pl.col("date_id") - min_date_id).alias("date_id")
+        )
 
         if self.synthetic_days:
             date_ids = sorted(train_data["date_id"].unique())[: self.synthetic_days]
@@ -233,7 +251,9 @@ class Predictor:
                 pred = self.predict(test, lags)
                 end_time = time.time()
                 duration = end_time - start_time
-                # print(f"self.predict(test, lags) took {duration:.4f} seconds")
+                print(f"self.predict(test, lags) took {duration:.4f} seconds")
+                # if test["date_id"][0] == 1:
+                #     print("here")
 
                 # Record performance
                 performance_monitor.record_performance(test, pred)
@@ -270,7 +290,12 @@ class Predictor:
 
                 batch_data = batch.select(META_COLS + lag_responder_cols)
                 date_id = batch["date_id"][0]
-                self.lag_cache.update(symbol_id, date_id, batch_data, is_lag_cache=True)  # type: ignore
+                if date_id != 0:  # initialization covered date_id = 0
+                    self.lag_cache.update(symbol_id, date_id, batch_data, is_lag_cache=True)  # type: ignore
+                    self.corr_cache.update(
+                        symbol_id, date_id, self.cache_history.cache, self.lag_cache.cache  # type: ignore
+                    )
+                # update correlation cache
 
         self.test_ = test
 
@@ -285,6 +310,8 @@ class Predictor:
                         META_COLS + ["weight"] + self.feature_cols
                     )
                     date_id = batch["date_id"][0]
+                    if symbol_id == 0:
+                        print("here")
                     self.cache_history.update(symbol_id, date_id, batch_data)  # type: ignore
 
                     symbol_ids.append(symbol_id)
@@ -293,26 +320,19 @@ class Predictor:
                 tdate = test["date_id"][-1]
                 ttime = batch["time_id"][-1]
                 # Pass the cache history to the prediction model
-                # estimates = self.model.get_estimates(
-                #     symbol_ids=symbol_ids,
-                #     cache_history=self.cache_history.cache,
-                #     lag_cache=self.lag_cache.cache,
-                #     tdate=tdate,
-                #     ttime=ttime,
-                # )
+                print(ttime)
 
-                self.model.fit(
-                    symbol_ids,
-                    self.cache_history,
-                    self.lag_cache,
-                    self.feature_cols,
-                )
                 try:
                     estimates = self.model.get_estimates(
                         symbol_ids=symbol_ids,
-                        test_data=test,
-                        feature_cols=self.feature_cols,
+                        cache_history=self.cache_history.cache,
+                        lag_cache=self.lag_cache.cache,
+                        corr_cache=self.corr_cache,
+                        tdate=tdate,
+                        ttime=ttime,
                     )
+
+                    print(estimates)
                 except Exception as e:
                     print(f"Error: {e}")
 
@@ -335,12 +355,14 @@ class Predictor:
 
         self.time_step_count += 1
         self.pbar.update(1)
-        # print(predictions)
+        print(predictions)
         return predictions
 
     def initialize_cache(self, data: pl.DataFrame):
         self.cache_history.initialize(data, META_COLS + ["weight"] + self.feature_cols)
         self.lag_cache.initialize(data, META_COLS + RESPONDER_COLS, lagged=True)
+        self.corr_cache.initialize(self.cache_history.cache, self.lag_cache.cache)
+        # initialize correlation cache here
 
 
 if __name__ == "__main__":
@@ -356,7 +378,27 @@ if __name__ == "__main__":
     #     lt_window=15,
     # )
     # model = RidgeCalculator(alpha=2.0)
-    model = LassoCalculator(alpha=1.0)
+    # model = LassoCalculator(
+    #     alpha=1.0,
+    #     max_iter=1000,
+    #     tol=1e-2,
+    #     lb=15,
+    #     truncate_calculator=TruncateCalculator(
+    #         lower_percentile=1.0, upper_percentile=99.0
+    #     ),
+    #     intercept=True,
+    # )
+    model = LinearRankedCorrelation(
+        long_term_feature=ExpWeightedMeanCalculator(halflife=0.35, lookback=5),
+        fitting_model=Lasso(
+            alpha=1.0,
+            fit_intercept=False,
+        ),
+        max_terms=10,
+        lt_window=5,
+        st_window=5,
+        smoothing_period=20,
+    )
     preprocessor = Preprocessor(
         symbol_id=None,
         responder=6,
@@ -384,6 +426,8 @@ if __name__ == "__main__":
             test_parquet=f"{LOCAL_DATA_DIR}/synthetic_test.parquet",
             lag_parquet=f"{LOCAL_DATA_DIR}/synthetic_lag.parquet",
             cache_lb_days=5,
+            cache_freq=1,
+            smoothing_period=20,
             test=True,  # Set to True for local testing
             partition_ids=[0],  # Specify partition IDs for synthetic data
             exclude_set={
@@ -396,8 +440,19 @@ if __name__ == "__main__":
                 "feature_26",
                 "feature_27",
                 "feature_31",
+                "feature_09",
+                "feature_10",
+                "feature_11",
+                "feature_20",
+                "feature_22",
+                "feature_23",
+                "feature_24",
+                "feature_25",
+                "feature_30",
+                "feature_61",
+                "feature_29",
             },
-            synthetic_days=10,  # Pass synthetic_days parameter
+            synthetic_days=6,  # Pass synthetic_days parameter
         )
     elif KAGGLE_TEST:
         predictor = Predictor(
