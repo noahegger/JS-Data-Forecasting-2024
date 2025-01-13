@@ -11,6 +11,7 @@ from calculators import (
 )
 from record import CorrelationCache, SymbolRecord
 from sklearn.linear_model import Lasso
+from sklearn.preprocessing import StandardScaler
 
 
 class BaseModel(ABC):
@@ -129,7 +130,8 @@ class LinearRankedCorrelation(BaseModel):
         for symbol in symbol_ids:
             if ttime < self.smoothing_period:
                 if (symbol, tdate) in self.initial_estimate_record:
-                    estimates.append(self.initial_estimate_record[(symbol, tdate)])
+                    estimates.append(0)
+                    # estimates.append(self.initial_estimate_record[(symbol, tdate)])
                 else:
                     try:
                         symbol_history = cache_history[symbol]
@@ -161,36 +163,63 @@ class LinearRankedCorrelation(BaseModel):
                         top_n=self.max_terms,
                     )
 
-                    # Prepare data for Lasso
-                    X = []
-                    y = []
-                    for record, lag_record in zip(
-                        list(symbol_history)[-self.st_window - 1 : -1],
-                        list(lag_history)[-self.st_window :],
-                    ):
-                        X.append(record.data[top_features].to_numpy())
-                        y.append(lag_record.data["responder_6_lag_1"].to_numpy())
+                    if not top_features:
+                        estimates.append(0)
+                    else:
+                        # Prepare data for Lasso
+                        X = []
+                        y = []
+                        for record, lag_record in zip(
+                            list(symbol_history)[-self.st_window - 1 : -1],
+                            list(lag_history)[-self.st_window :],
+                        ):
+                            X.append(record.data[top_features].to_numpy())
+                            y.append(lag_record.data["responder_6_lag_1"].to_numpy())
 
-                    X = np.vstack(X)
-                    y = np.concatenate(y)
+                        X = np.vstack(X)
+                        y = np.concatenate(y)
 
-                    # Drop NaNs
-                    mask = ~np.isnan(X).any(axis=1) & ~np.isnan(y)
-                    X = X[mask]
-                    y = y[mask]
+                        # Drop NaNs
+                        mask = ~np.isnan(X).any(axis=1) & ~np.isnan(y)
+                        X = X[mask]
+                        y = y[mask]
 
-                    # Fit Lasso
-                    from sklearn.linear_model import LassoCV
+                        # Fit Lasso
+                        from sklearn.linear_model import LassoCV
 
-                    # model = LassoCV(cv=5).fit(X, y)
-                    model = Lasso(
-                        alpha=0.1, fit_intercept=False
-                    )  # CV(cv=5)  # self.fitting_model
-                    model.fit(X, y)
+                        # model = LassoCV(cv=5).fit(X, y)
+                        scaler = StandardScaler()
+                        X_scaled = scaler.fit_transform(X)
+                        model = Lasso(alpha=0.05, fit_intercept=False).fit(X_scaled, y)
+                        # model = Lasso(
+                        #     alpha=0.1, fit_intercept=False
+                        # )  # CV(cv=5)  # self.fitting_model
+                        model.fit(X, y)
+                        print(model.coef_)
 
-                    # Predict
-                    curr_x = day_data[top_features].tail(1).to_numpy()
-                    estimates.append(model.predict(curr_x)[0])
+                        # Predict
+                        curr_x = day_data[top_features].tail(1).to_numpy()
+                        prediction = model.predict(curr_x)[0]
+                        original_feature = top_features[0].replace("_rolling_sign", "")
+
+                        # Calculate the rolling standard deviation of the original feature
+                        # try:
+                        #     original_feature_data = day_data[
+                        #         original_feature
+                        #     ].to_numpy()
+                        #     rolling_std = np.std(
+                        #         lag_record.data["responder_6_lag_1"].to_numpy()
+                        #     ) / np.std(original_feature_data[-20:])
+                        #     if np.isnan(rolling_std):
+                        #         print(
+                        #             f"Rolling std is NaN for feature: {original_feature}"
+                        #         )
+                        #         adj = prediction
+                        #     else:
+                        #         adj = rolling_std * prediction
+                        estimates.append(prediction)
+                        # except Exception:
+                        #     print("oops")
                 except KeyError:
                     print(
                         f"Symbol: {symbol} not found in cache for tdate, ttime: {tdate, ttime}. Filling with 0"

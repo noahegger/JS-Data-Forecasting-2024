@@ -155,6 +155,10 @@ class PerformanceMonitor:
         self, performance_path="performance_tracking.parquet", r2_path="r2.parquet"
     ):
         # Concatenate all batches into a single DataFrame
+        self.batch_performances = [
+            df.with_columns([pl.col(col).cast(pl.Float64) for col in df.columns])
+            for df in self.batch_performances
+        ]
         performance_tracking_df = pl.concat(self.batch_performances)
         performance_tracking_df.write_parquet(f"{self.folder}/" + performance_path)
 

@@ -208,8 +208,11 @@ class CorrelationCache:
                 # Collect all correlation values for the feature
                 correlations = [record.corr for record in records]
                 # Calculate the mean of the absolute values of the correlations
-                mean_abs_corr = np.mean(np.abs(correlations))
-                feature_correlations[feature] = mean_abs_corr
+                if all(c > 0 for c in correlations) or all(c < 0 for c in correlations):
+                    # Calculate the mean of the absolute values of the correlations
+                    abs_correlations = np.abs(correlations)
+                    mean_abs_corr = np.mean(abs_correlations)
+                    feature_correlations[feature] = mean_abs_corr
         feature_correlations = {
             k: v for k, v in feature_correlations.items() if not np.isnan(v)
         }

@@ -429,30 +429,29 @@ if __name__ == "__main__":
             cache_freq=1,
             smoothing_period=20,
             test=True,  # Set to True for local testing
-            partition_ids=[0],  # Specify partition IDs for synthetic data
-            exclude_set={
-                "feature_00",
-                "feature_01",
-                "feature_02",
-                "feature_03",
-                "feature_04",
-                "feature_21",
-                "feature_26",
-                "feature_27",
-                "feature_31",
-                "feature_09",
-                "feature_10",
-                "feature_11",
-                "feature_20",
-                "feature_22",
-                "feature_23",
-                "feature_24",
-                "feature_25",
-                "feature_30",
-                "feature_61",
-                "feature_29",
-            },
-            synthetic_days=6,  # Pass synthetic_days parameter
+            partition_ids=[8],  # Specify partition IDs for synthetic data
+            exclude_set=set(),
+            # "feature_00",
+            # "feature_01",
+            # "feature_02",
+            # "feature_03",
+            # "feature_04",
+            # "feature_21",
+            # "feature_26",
+            # "feature_27",
+            # "feature_31",
+            # "feature_09",
+            # "feature_10",
+            # "feature_11",
+            # "feature_20",
+            # "feature_22",
+            # "feature_23",
+            # "feature_24",
+            # "feature_25",
+            # "feature_30",
+            # "feature_61",
+            # "feature_29",
+            synthetic_days=15,  # Pass synthetic_days parameter
         )
     elif KAGGLE_TEST:
         predictor = Predictor(
