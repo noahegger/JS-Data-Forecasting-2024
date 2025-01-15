@@ -1,19 +1,32 @@
 from collections import defaultdict, deque
+from itertools import combinations
 from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
 import polars as pl
+from scipy.stats import spearmanr
 
 
 class SymbolRecord:
-    def __init__(self, tdate: int, data: pl.DataFrame, freq: int = 1):
+    def __init__(
+        self,
+        tdate: int,
+        data: pl.DataFrame,
+        freq: int = 1,
+        cross_term: Optional[str] = None,
+    ):
         self.tdate = tdate
         self.data = data
         self.freq = freq
+        self.cross_term = cross_term
 
     def get_feature_series(self, feature_column: str):
         return self.data[feature_column]  # .shift(-int(20/self.freq))
+
+    def add_smoothed_response(self, period: int = 20):
+        mean_response = self.data["responder_6"].rolling_mean(period)
+        self.data = self.data.with_columns(mean_response.alias("responder_6_smoothed"))
 
     def add_derived_features(self, period: int = 20):
         for col in self.data.columns:
@@ -25,13 +38,64 @@ class SymbolRecord:
                     .then(-1)
                     .otherwise(0)
                 )
+                rolling_sign_mean = rolling_sign.rolling_mean(period)
+
+                if self.cross_term is None or self.cross_term == "std":
+                    rolling_std = self.data[col].rolling_std(period)
+                    prod_std = rolling_sign_mean * rolling_std
+                    self.data = self.data.with_columns(
+                        prod_std.alias(f"{col}_rolling_sign_std")
+                    )
+                    # self.data = self.data.with_columns(
+                    #     rolling_std.alias(f"{col}_rolling_sign_std")
+                    # )
+
+                if self.cross_term is None or self.cross_term == "mean":
+                    rolling_mean = self.data[col].rolling_mean(period)
+                    prod_mean = rolling_sign_mean * rolling_mean
+                    self.data = self.data.with_columns(
+                        prod_mean.alias(f"{col}_rolling_sign_mean")
+                    )
+                    # self.data = self.data.with_columns(
+                    #     rolling_mean.alias(f"{col}_rolling_sign_mean")
+                    # )
+
+                # if self.cross_term is None or self.cross_term == "med":
+                #     rolling_med = self.data[col].rolling_median(period)
+                #     # prod_mean = rolling_sign_mean * rolling_mean
+                #     # self.data = self.data.with_columns(
+                #     #     prod_mean.alias(f"{col}_rolling_sign_mean")
+                #     # )
+                #     self.data = self.data.with_columns(
+                #         rolling_med.alias(f"{col}_rolling_sign_med")
+                #     )
+
+                if self.cross_term is None or self.cross_term == "self":
+                    prod_self = rolling_sign_mean * self.data[col]
+                    self.data = self.data.with_columns(
+                        prod_self.alias(f"{col}_rolling_sign_self")
+                    )
+
+                # if self.cross_term is None:
                 self.data = self.data.with_columns(
-                    rolling_sign.rolling_mean(period).alias(f"{col}_rolling_sign")
+                    rolling_sign_mean.alias(f"{col}_rolling_sign")
                 )
+        # feature_columns = [
+        #     col
+        #     for col in self.data.columns
+        #     if "feature" in col and "_rolling_sign" not in col
+        # ]
+        # feature_pairs = combinations(feature_columns, 2)
+
+        # for col1, col2 in feature_pairs:
+        #     new_feature_name = f"{col1}_rolling_sign_{col2}"
+        #     if new_feature_name not in self.data.columns:
+        #         prod = self.data[col1] * self.data[col2]
+        #         self.data = self.data.with_columns(prod.alias(new_feature_name))
 
 
 class SymbolCorrRecord:
-    def __init__(self, tdate: int, corr: float):
+    def __init__(self, tdate: int, corr):
         self.tdate = tdate
         self.corr = corr
 
@@ -69,6 +133,8 @@ class Cache:
                         (pl.col("date_id") + 1).alias("date_id")
                     )
                 record = SymbolRecord(date_id, batch_data)  # type: ignore
+                if lagged:
+                    record.add_smoothed_response(self.smoothing_period)
                 if not lagged:
                     record.add_derived_features(
                         self.smoothing_period
@@ -93,7 +159,9 @@ class Cache:
             #     return  # Do nothing if tdate is already in the cache
             # else:
             batch_data = batch_data.filter(pl.col("time_id") % self.freq == 0)
-            self.cache[symbol_id].append(SymbolRecord(date_id, batch_data))
+            record = SymbolRecord(date_id, batch_data)
+            record.add_smoothed_response(self.smoothing_period)
+            self.cache[symbol_id].append(record)
 
         else:
             assert batch_data["time_id"].unique().shape[0] == 1
@@ -156,19 +224,27 @@ class CorrelationCache:
                 date_id = record.tdate
                 for feature in feature_list:
                     feature_data = record.data[feature].to_numpy()
-                    lag_data = lag_record.data["responder_6_lag_1"].to_numpy()
+                    # lag_data = lag_record.data["responder_6_lag_1"].to_numpy()
+                    lag_data = lag_record.data["responder_6_smoothed"].to_numpy()
 
                     # Create masked arrays to ignore NaNs
                     feature_data_masked = np.ma.masked_invalid(feature_data)
                     lag_data_masked = np.ma.masked_invalid(lag_data)
 
-                    # Calculate Pearson correlation using masked arrays
-                    corr = np.ma.corrcoef(feature_data_masked, lag_data_masked)[0, 1]
-                    if np.ma.is_masked(corr):
+                    valid_mask = ~feature_data_masked.mask & ~lag_data_masked.mask
+                    feature_data_aligned = feature_data_masked[valid_mask]
+                    lag_data_aligned = lag_data_masked[valid_mask]
+                    # Calculate Spearman correlation using masked arrays
+                    # Require at least 500 data points of the day to calculate correlation
+                    ## For example, if only 10 data points are used to calculate a corr, not useful
+                    if len(feature_data_aligned) > 500 and len(lag_data_aligned) > 500:
+                        corr, _ = spearmanr(feature_data_aligned, lag_data_aligned)
+
+                    else:
                         corr = np.nan
 
                     self.cache[symbol_id][feature].append(
-                        SymbolCorrRecord(date_id, corr)
+                        SymbolCorrRecord(date_id, corr)  # type: ignore
                     )
 
     def update(
@@ -186,33 +262,67 @@ class CorrelationCache:
         date_id = record.tdate
         for feature in feature_list:
             feature_data = record.data[feature].to_numpy()
-            lag_data = lag_record.data["responder_6_lag_1"].to_numpy()
+            # lag_data = lag_record.data["responder_6_lag_1"].to_numpy()
+            lag_data = lag_record.data["responder_6_smoothed"].to_numpy()
 
             # Create masked arrays to ignore NaNs
             feature_data_masked = np.ma.masked_invalid(feature_data)
             lag_data_masked = np.ma.masked_invalid(lag_data)
+            valid_mask = ~feature_data_masked.mask & ~lag_data_masked.mask
+            feature_data_aligned = feature_data_masked[valid_mask]
+            lag_data_aligned = lag_data_masked[valid_mask]
 
             # Calculate Pearson correlation using masked arrays
-            corr = np.ma.corrcoef(feature_data_masked, lag_data_masked)[0, 1]
-            if np.ma.is_masked(corr):
+            if len(feature_data_aligned) > 1 and len(lag_data_aligned) > 1:
+                corr, _ = spearmanr(feature_data_aligned, lag_data_aligned)
+
+            else:
                 corr = np.nan
 
-            self.cache[symbol_id][feature].append(SymbolCorrRecord(date_id, corr))
+            self.cache[symbol_id][feature].append(SymbolCorrRecord(date_id, corr))  # type: ignore
 
     def get_top_features(
-        self, symbol_id: int, available_features: List[str], top_n: int = 10
+        self,
+        symbol_id: int,
+        available_features: List[str],
+        top_n: int = 10,
+        threshold: float = 0.15,
+        min_records: int = 7,
     ):  # Probably not working correctly
+        def has_min_consecutive_same_sign(correlations, min_records):
+            count = 0
+            sign = None
+            for corr in correlations:
+                if np.isnan(corr):
+                    count = 0
+                    sign = None
+                else:
+                    current_sign = np.sign(corr)
+                    if sign is None:
+                        sign = current_sign
+                        count = 1
+                    elif current_sign == sign:
+                        count += 1
+                        if count >= min_records:
+                            return True
+                    else:
+                        count = 1
+                        sign = current_sign
+            return False
+
         feature_correlations = {}
         for feature, records in self.cache[symbol_id].items():
             if feature in available_features:
                 # Collect all correlation values for the feature
                 correlations = [record.corr for record in records]
-                # Calculate the mean of the absolute values of the correlations
-                if all(c > 0 for c in correlations) or all(c < 0 for c in correlations):
+                # Ensure there are at least min_records consecutive correlations with the same sign
+                if has_min_consecutive_same_sign(correlations, min_records):
                     # Calculate the mean of the absolute values of the correlations
                     abs_correlations = np.abs(correlations)
                     mean_abs_corr = np.mean(abs_correlations)
-                    feature_correlations[feature] = mean_abs_corr
+                    # Check if mean_abs_corr is above the threshold
+                    if mean_abs_corr > threshold:
+                        feature_correlations[feature] = mean_abs_corr
         feature_correlations = {
             k: v for k, v in feature_correlations.items() if not np.isnan(v)
         }
@@ -220,4 +330,7 @@ class CorrelationCache:
         sorted_features = sorted(
             feature_correlations, key=lambda x: feature_correlations[x], reverse=True
         )
-        return sorted_features[:top_n]
+
+        return sorted_features[:top_n], [
+            feature_correlations[feature] for feature in sorted_features[:top_n]
+        ]

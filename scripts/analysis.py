@@ -20,6 +20,7 @@ from plotting import (
     grid_search_feature_interactions,
     grid_search_rolling_sum,
     grid_search_rolling_sum_scaled_sign,
+    grid_search_sign_correlations,
     plot_acf_subplots,
     plot_average_responder_over_days,
     plot_cross_feature_time_series,
@@ -49,7 +50,7 @@ DATA_DIR = Path("/Users/noahegger/git/JS-Data-Forecasting-2024")
 if __name__ == "__main__":
 
     start = 0
-    end = 1
+    end = 5
 
     model_paths = [
         # f"{DATA_DIR}/model_results/Lasso_1.0_r2.parquet",
@@ -67,8 +68,8 @@ if __name__ == "__main__":
         # f"{DATA_DIR}/model_results/Base15d_ExpMean_performance.parquet",
         f"{DATA_DIR}/model_results/RankedCorrelation_performance.parquet",
     ]
-    symbols = [0]  #
-    # [0, 1, 7, 9, 10, 16, 19, 12, 13, 33]
+    symbols = [10]  #
+    symbols = [0, 1, 7, 9, 10, 16, 19, 12, 13, 33]
     features = [
         "feature_05",
         "feature_06",
@@ -107,7 +108,7 @@ if __name__ == "__main__":
     #     partition_ids=[0],
     #     sample_frequency=15,
     # ).read_partition()
-    # plot_r2_time_series(model_paths, start, end)
+    plot_r2_time_series(model_paths, start, end)
     # plot_per_symbol_r2(performance_paths, start, end)
     # plot_per_symbol_cum_error(
     #     performance_paths=performance_paths, start=start, s=e nd, symbols=symbols
@@ -116,15 +117,15 @@ if __name__ == "__main__":
     #     performance_paths[0],
     #     start,
     #     end,
-    #     16,
     #     12,
-    #     ["feature_60"],  # ["feature_40" "feature_71", "feature_34", "feature_75"]
+    #     20,
+    #     ["feature_49"],  # ["feature_40" "feature_71", "feature_34", "feature_75"]
     # )
     # plot_cross_feature_time_series(
-    #     performance_paths[0], start, end, 1, "feature_18", "feature_62"
+    #     performance_paths[0], start, end, 1, "feature_63", "feature_38"
     # )
     # plot_feature_histograms(performance_paths[0], 1, features)
-    plot_true_vs_pred(performance_paths[0], start, end, 0)
+    # plot_true_vs_pred(performance_paths[0], start, end, 0)
     # plot_responder_6_per_day(performance_paths[0], start, end, 0)
     # plot_day_comparison(performance_paths[0], start, end, 1)
     # plot_feature_vs_responder_6_scatter(
@@ -141,7 +142,7 @@ if __name__ == "__main__":
     #     ],  # ["feature_18", "feature_67"],  # ["feature_33", "feature_44", "feature_40"],
     #     transform="mean",
     # )
-    # plot_acf_subplots(performance_paths[0], start, end, 1, features[10:12])
+    # # plot_acf_subplots(performance_paths[0], start, end, 1, features[10:12])
     # grid_search_correlations(
     #     performance_paths[0], symbols, features, start, end, plot_matrix=False
     # )
@@ -151,7 +152,7 @@ if __name__ == "__main__":
     #     features,
     #     start,
     #     end,
-    #     cross_with="std",
+    #     cross_with="weight",
     #     plot_matrix=False,
     # )
     # grid_search_feature_interactions(
@@ -162,3 +163,4 @@ if __name__ == "__main__":
     # grid_search_rolling_sum_scaled_sign(
     #     performance_paths[0], symbols, features, start, end
     # )
+    # grid_search_sign_correlations(performance_paths[0], symbols, features, start, end)

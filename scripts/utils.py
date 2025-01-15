@@ -138,6 +138,16 @@ class PerformanceMonitor:
             merged_df["responder_6_pred"].to_numpy(),
         )
         merged_df = merged_df.with_columns(pl.Series("symbol_r2", symbol_r2))
+        print(
+            merged_df.select(
+                "row_id",
+                "symbol_id",
+                "weight",
+                "responder_6",
+                "responder_6_pred",
+                "symbol_r2",
+            )
+        )
 
         r2_score = self.get_custom_r2(
             merged_df["responder_6"].to_numpy(),
@@ -149,16 +159,21 @@ class PerformanceMonitor:
         date_id = test["date_id"].unique()[0]
         time_id = test["time_id"].unique()[0]
         self.r2_records.append({"date_id": date_id, "time_id": time_id, "r2": r2_score})
+        print(f"Average R2 Score: {np.mean([r['r2'] for r in self.r2_records])}")
+
         self.batch_performances.append(merged_df)
 
     def save_results(
         self, performance_path="performance_tracking.parquet", r2_path="r2.parquet"
     ):
         # Concatenate all batches into a single DataFrame
-        self.batch_performances = [
-            df.with_columns([pl.col(col).cast(pl.Float64) for col in df.columns])
-            for df in self.batch_performances
-        ]
+        try:
+            self.batch_performances = [
+                df.with_columns([pl.col(col).cast(pl.Float64) for col in df.columns])
+                for df in self.batch_performances
+            ]
+        except Exception as e:
+            print("HERE", e)
         performance_tracking_df = pl.concat(self.batch_performances)
         performance_tracking_df.write_parquet(f"{self.folder}/" + performance_path)
 

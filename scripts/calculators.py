@@ -281,9 +281,9 @@ class TruncateCalculator:
         self.upper_percentile = upper_percentile
 
     def truncate(self, X, y):
-        lower_bound = np.percentile(X, self.lower_percentile, axis=0)
-        upper_bound = np.percentile(X, self.upper_percentile, axis=0)
-        mask = np.all((X >= lower_bound) & (X <= upper_bound), axis=1)
+        lower_bound = np.percentile(y, self.lower_percentile, axis=0)
+        upper_bound = np.percentile(y, self.upper_percentile, axis=0)
+        mask = (y >= lower_bound) & (y <= upper_bound)
         return X[mask], y[mask]
 
 

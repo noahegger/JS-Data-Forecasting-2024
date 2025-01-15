@@ -310,8 +310,6 @@ class Predictor:
                         META_COLS + ["weight"] + self.feature_cols
                     )
                     date_id = batch["date_id"][0]
-                    if symbol_id == 0:
-                        print("here")
                     self.cache_history.update(symbol_id, date_id, batch_data)  # type: ignore
 
                     symbol_ids.append(symbol_id)
@@ -320,7 +318,6 @@ class Predictor:
                 tdate = test["date_id"][-1]
                 ttime = batch["time_id"][-1]
                 # Pass the cache history to the prediction model
-                print(ttime)
 
                 try:
                     estimates = self.model.get_estimates(
@@ -332,7 +329,7 @@ class Predictor:
                         ttime=ttime,
                     )
 
-                    print(estimates)
+                    # print("Estimates:", estimates)
                 except Exception as e:
                     print(f"Error: {e}")
 
@@ -340,14 +337,15 @@ class Predictor:
                     {
                         "row_id": row_ids,
                         "responder_6": estimates,
-                    }
+                    },
+                    strict=False,
                 )
             except Exception as e:
                 print(f"Error: {e}")
 
         else:
             predictions = pl.DataFrame(
-                {"row_id": test["row_id"], "responder_6": [0] * len(test)}
+                {"row_id": test["row_id"], "responder_6": [float(0)] * len(test)}
             )
         assert isinstance(predictions, pl.DataFrame | pd.DataFrame)
         assert list(predictions.columns) == ["row_id", "responder_6"]
@@ -394,9 +392,9 @@ if __name__ == "__main__":
             alpha=1.0,
             fit_intercept=False,
         ),
-        max_terms=10,
-        lt_window=5,
-        st_window=5,
+        max_terms=5,
+        lt_window=7,
+        st_window=7,
         smoothing_period=20,
     )
     preprocessor = Preprocessor(
@@ -425,33 +423,34 @@ if __name__ == "__main__":
             dir=LOCAL_DATA_DIR,
             test_parquet=f"{LOCAL_DATA_DIR}/synthetic_test.parquet",
             lag_parquet=f"{LOCAL_DATA_DIR}/synthetic_lag.parquet",
-            cache_lb_days=5,
+            cache_lb_days=10,
             cache_freq=1,
             smoothing_period=20,
             test=True,  # Set to True for local testing
-            partition_ids=[8],  # Specify partition IDs for synthetic data
-            exclude_set=set(),
-            # "feature_00",
-            # "feature_01",
-            # "feature_02",
-            # "feature_03",
-            # "feature_04",
-            # "feature_21",
-            # "feature_26",
-            # "feature_27",
-            # "feature_31",
-            # "feature_09",
-            # "feature_10",
-            # "feature_11",
-            # "feature_20",
-            # "feature_22",
-            # "feature_23",
-            # "feature_24",
-            # "feature_25",
-            # "feature_30",
-            # "feature_61",
-            # "feature_29",
-            synthetic_days=15,  # Pass synthetic_days parameter
+            partition_ids=[0],  # Specify partition IDs for synthetic data
+            exclude_set={
+                "feature_00",
+                "feature_01",
+                "feature_02",
+                "feature_03",
+                "feature_04",
+                "feature_21",
+                "feature_26",
+                "feature_27",
+                "feature_31",
+                "feature_09",
+                "feature_10",
+                "feature_11",
+                "feature_20",
+                "feature_22",
+                "feature_23",
+                "feature_24",
+                "feature_25",
+                "feature_30",
+                "feature_61",
+                "feature_29",
+            },
+            synthetic_days=11,  # Pass synthetic_days parameter
         )
     elif KAGGLE_TEST:
         predictor = Predictor(

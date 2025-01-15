@@ -460,7 +460,7 @@ def plot_r2_time_series(r2_parquet_paths, start, end):
             r2_df.index,
             rolling_mean,
             linestyle="-",
-            label=f"{file_name} Rolling Mean R² (Mean R²: {mean_r2:.2f})",
+            label=f"{file_name} Rolling Mean R² (Mean R²: {mean_r2:.5f})",
         )
 
     plt.xlabel("Index")
@@ -543,15 +543,16 @@ def plot_feature_time_series(
 
     for feature in features:
 
-        rolling_sum = symbol_df[feature].rolling(20).sum()
+        rolling_mean = symbol_df[feature].rolling(20).mean()
 
         plt.plot(
             symbol_df.index,
-            # rolling_sum * symbol_df[feature].apply(np.sign).rolling(20).mean(),
-            symbol_df[feature].apply(np.sign).rolling(period).mean()
-            * symbol_df[feature]
-            .rolling(period)
-            .std(),  # - feature.rolling(period).mean(),
+            # rolling_mean,
+            symbol_df[feature].shift(period),  # .apply(np.sign).rolling(period).mean(),
+            # * symbol_df["weight"].iloc[-1],
+            # * symbol_df[feature]
+            # .rolling(period)
+            # .std(),  # - feature.rolling(period).mean(),
             # .rolling(5).mean(),
             # rolling_sum,  # - symbol_df[feature].shift(20),  # .rolling(20).sum(),
             label=f"{feature}",
@@ -900,9 +901,17 @@ def grid_search_correlations(
 
         for feature in features:
             if feature in symbol_df.columns:
+                # Compute Spearman correlation of the feature itself with responder_6
+                feature_corr = symbol_df[feature].corr(
+                    symbol_df["responder_6"], method="spearman"
+                )
+                symbol_results.append(
+                    {"symbol": symbol, "feature": feature, "correlation": feature_corr}
+                )
+
                 rolling_features = {}
                 for period in range(5, 21):
-                    # Compute rolling mean, rolling std, and absolute mean sign
+                    # Compute rolling mean, rolling std, absolute mean sign, and shifted feature
                     rolling_features[f"{feature}_rolling_mean_{period}"] = (
                         symbol_df[feature].rolling(window=period).mean()
                     )
@@ -916,22 +925,28 @@ def grid_search_correlations(
                         .mean()
                         .abs()
                     )
+                    rolling_features[f"{feature}_shifted_{period}"] = symbol_df[
+                        feature
+                    ].shift(period)
 
                 # Concatenate all rolling features to the DataFrame at once
                 rolling_df = pd.concat(rolling_features, axis=1)
                 symbol_df = pd.concat([symbol_df, rolling_df], axis=1)
 
                 for period in range(5, 21):
-                    # Compute correlation with responder_6
+                    # Compute Spearman correlation with responder_6
                     rolling_mean_corr = symbol_df[
                         f"{feature}_rolling_mean_{period}"
-                    ].corr(symbol_df["responder_6"])
+                    ].corr(symbol_df["responder_6"], method="spearman")
                     rolling_std_corr = symbol_df[
                         f"{feature}_rolling_std_{period}"
-                    ].corr(symbol_df["responder_6"])
+                    ].corr(symbol_df["responder_6"], method="spearman")
                     abs_mean_sign_corr = symbol_df[
                         f"{feature}_abs_mean_sign_{period}"
-                    ].corr(symbol_df["responder_6"])
+                    ].corr(symbol_df["responder_6"], method="spearman")
+                    shifted_corr = symbol_df[f"{feature}_shifted_{period}"].corr(
+                        symbol_df["responder_6"], method="spearman"
+                    )
 
                     # Store the results
                     symbol_results.append(
@@ -955,39 +970,35 @@ def grid_search_correlations(
                             "correlation": abs_mean_sign_corr,
                         }
                     )
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_shifted_{period}",
+                            "correlation": shifted_corr,
+                        }
+                    )
 
         # Sort by the absolute value of the correlation and select the top 30
         top_features = sorted(
             symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
-        )
-
-        # Ensure only one mean, one std, or one abs mean sign feature per feature is chosen
-        chosen_features = {}
-        final_top_features = []
-        for result in top_features:
-            base_feature = result["feature"].rsplit("_", 2)[0]
-            if base_feature not in chosen_features:
-                chosen_features[base_feature] = result["feature"]
-                final_top_features.append(result)
-            if len(final_top_features) == 30:
-                break
+        )[:30]
 
         # Print the results
         print(f"Symbol: {symbol}")
         print(f"{'Feature':<30} | {'Correlation':<10}")
-        for result in final_top_features:
+        for result in top_features:
             print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
 
-        results.extend(final_top_features)
+        results.extend(top_features)
 
         if plot_matrix:
             # Extract the top 20 features for the correlation matrix
-            top_20_features = [result["feature"] for result in final_top_features[:20]]
+            top_20_features = [result["feature"] for result in top_features[:20]]
             top_20_df = symbol_df[top_20_features]
 
             # Plot the correlation matrix
             plt.figure(figsize=(12, 10))
-            corr_matrix = top_20_df.corr()
+            corr_matrix = top_20_df.corr(method="spearman")
             sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", cbar=True)
             plt.title(f"Correlation Matrix for Top 20 Features - Symbol {symbol}")
             plt.tight_layout(pad=2.0)  # Adjust padding to create bigger margins
@@ -1024,7 +1035,7 @@ def grid_search_correlations_scaled(
         for feature in features:
             if feature in symbol_df.columns:
                 rolling_features = {}
-                for period in range(5, 21):
+                for period in range(20, 21):
                     # Compute rolling mean, rolling std, and absolute mean sign
                     rolling_mean = symbol_df[feature].rolling(window=period).mean()
                     rolling_std = symbol_df[feature].rolling(window=period).std()
@@ -1041,6 +1052,8 @@ def grid_search_correlations_scaled(
                         scaled_feature = mean_sign * symbol_df[feature]
                     elif cross_with == "median":
                         scaled_feature = mean_sign * rolling_med
+                    elif cross_with == "weight":
+                        scaled_feature = mean_sign * symbol_df["weight"].iloc[-1]
 
                     rolling_features[f"{feature}_scaled_{cross_with}_{period}"] = (
                         scaled_feature
@@ -1050,7 +1063,7 @@ def grid_search_correlations_scaled(
                 rolling_df = pd.concat(rolling_features, axis=1)
                 symbol_df = pd.concat([symbol_df, rolling_df], axis=1)
 
-                for period in range(5, 21):
+                for period in range(20, 21):
                     # Compute correlation with responder_6
                     scaled_corr = symbol_df[
                         f"{feature}_scaled_{cross_with}_{period}"
@@ -1359,5 +1372,137 @@ def grid_search_rolling_sum_scaled_sign(
             print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
 
         results.extend(top_features)
+
+    return pd.DataFrame(results)
+
+
+def grid_search_sign_correlations(
+    performance_path, symbols, features, start, end, plot_matrix=False
+):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    results = []
+
+    for symbol in symbols:
+        # Filter the DataFrame for the given symbol
+        symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+        # Filter the DataFrame for the given date range
+        symbol_df = symbol_df[
+            (symbol_df["date_id"] >= start) & (symbol_df["date_id"] <= end)
+        ]
+
+        symbol_results = []
+
+        for feature in features:
+            if feature in symbol_df.columns:
+                rolling_features = {}
+                for period in range(20, 21):
+                    # Compute rolling mean, absolute mean sign, and shifted feature
+                    rolling_features[f"{feature}_rolling_mean_{period}"] = (
+                        symbol_df[feature].rolling(window=period).mean()
+                    )
+                    # rolling_features[feature] = symbol_df[feature]
+                    rolling_features[f"{feature}_mean_sign_{period}"] = (
+                        symbol_df[feature]
+                        .apply(lambda x: 1 if x > 0 else -1)
+                        .rolling(window=period)
+                        .mean()
+                    )
+                    rolling_features[f"{feature}_shifted_{period}"] = symbol_df[
+                        feature
+                    ].shift(period)
+
+                # Concatenate all rolling features to the DataFrame at once
+                rolling_df = pd.concat(rolling_features, axis=1)
+                symbol_df = pd.concat([symbol_df, rolling_df], axis=1)
+
+                for period in range(20, 21):
+                    # Compute sign correlation with responder_6
+                    rolling_mean_sign_corr = (
+                        symbol_df[f"{feature}_rolling_mean_{period}"]
+                        .apply(np.sign)
+                        .corr(
+                            symbol_df["responder_6"].apply(np.sign), method="spearman"
+                        )
+                    )
+                    feature_sign_corr = (
+                        symbol_df[feature]
+                        .apply(np.sign)
+                        .corr(
+                            symbol_df["responder_6"].apply(np.sign), method="spearman"
+                        )
+                    )
+                    abs_mean_sign_corr = (
+                        symbol_df[f"{feature}_mean_sign_{period}"]
+                        .apply(np.sign)
+                        .corr(
+                            symbol_df["responder_6"].apply(np.sign), method="spearman"
+                        )
+                    )
+                    shifted_sign_corr = (
+                        symbol_df[f"{feature}_shifted_{period}"]
+                        .apply(np.sign)
+                        .corr(
+                            symbol_df["responder_6"].apply(np.sign), method="spearman"
+                        )
+                    )
+
+                    # Store the results
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_rolling_mean_sign_{period}",
+                            "correlation": rolling_mean_sign_corr,
+                        }
+                    )
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": feature,
+                            "correlation": feature_sign_corr,
+                        }
+                    )
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_abs_mean_sign_{period}",
+                            "correlation": abs_mean_sign_corr,
+                        }
+                    )
+                    symbol_results.append(
+                        {
+                            "symbol": symbol,
+                            "feature": f"{feature}_shifted_sign_{period}",
+                            "correlation": shifted_sign_corr,
+                        }
+                    )
+
+        # Sort by the absolute value of the correlation and select the top 30
+        top_features = sorted(
+            symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
+        )[:30]
+
+        # Print the results
+        print(f"Symbol: {symbol}")
+        print(f"{'Feature':<30} | {'Correlation':<10}")
+        for result in top_features:
+            print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
+
+        results.extend(top_features)
+
+        if plot_matrix:
+            # Extract the top 20 features for the correlation matrix
+            top_20_features = [result["feature"] for result in top_features[:20]]
+            top_20_df = symbol_df[top_20_features]
+
+            # Plot the correlation matrix
+            plt.figure(figsize=(12, 10))
+            corr_matrix = top_20_df.corr(method="spearman")
+            sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", cbar=True)
+            plt.title(f"Correlation Matrix for Top 20 Features - Symbol {symbol}")
+            plt.tight_layout(pad=2.0)  # Adjust padding to create bigger margins
+            plt.show()
 
     return pd.DataFrame(results)

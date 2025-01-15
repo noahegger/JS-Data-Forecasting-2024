@@ -8,9 +8,10 @@ from calculators import (
     LassoCalculator,
     MeanCalculator,
     RevDecayCalculator,
+    TruncateCalculator,
 )
 from record import CorrelationCache, SymbolRecord
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Lasso, LassoCV
 from sklearn.preprocessing import StandardScaler
 
 
@@ -128,22 +129,22 @@ class LinearRankedCorrelation(BaseModel):
     ):
         estimates = []
         for symbol in symbol_ids:
-            if ttime < self.smoothing_period:
-                if (symbol, tdate) in self.initial_estimate_record:
-                    estimates.append(0)
-                    # estimates.append(self.initial_estimate_record[(symbol, tdate)])
-                else:
-                    try:
-                        symbol_history = cache_history[symbol]
-                        symbol_lags = lag_cache[symbol]
-                        estimate = self.get_estimate(symbol_lags)
-                        self.initial_estimate_record[(symbol, tdate)] = estimate
-                        estimates.append(estimate)
-                    except KeyError:
-                        print(
-                            f"Symbol: {symbol} not found in cache for tdate, ttime: {tdate, ttime}. Filling with 0"
-                        )
-                        estimates.append(0)
+            if ttime < self.smoothing_period or ttime > 800:
+                # if (symbol, tdate) in self.initial_estimate_record:
+                estimates.append(float(0))
+                # estimates.append(self.initial_estimate_record[(symbol, tdate)])
+                # else:
+                #     try:
+                #         # symbol_history = cache_history[symbol]
+                #         # symbol_lags = lag_cache[symbol]
+                #         # estimate = self.get_estimate(symbol_lags)
+                #         # self.initial_estimate_record[(symbol, tdate)] = estimate
+                #         estimates.append(float(0))  # estimate
+                #     except KeyError:
+                #         print(
+                #             f"Symbol: {symbol} not found in cache for tdate, ttime: {tdate, ttime}. Filling with 0"
+                #         )
+                #         estimates.append(float(0))
             else:
                 try:
                     symbol_history = cache_history[symbol]
@@ -157,11 +158,17 @@ class LinearRankedCorrelation(BaseModel):
                     ]
 
                     # Get top features
-                    top_features = corr_cache.get_top_features(
+                    top_features, corrs = corr_cache.get_top_features(
                         symbol,
                         available_features,
                         top_n=self.max_terms,
+                        threshold=0.15,
+                        min_records=self.lt_window,
                     )
+                    if top_features:
+                        print("Symbol:", symbol, "Tdate:", tdate)
+                        for feature, c in zip(top_features, corrs):
+                            print(f"Feature: {feature}, Correlation: {c}")
 
                     if not top_features:
                         estimates.append(0)
@@ -174,7 +181,8 @@ class LinearRankedCorrelation(BaseModel):
                             list(lag_history)[-self.st_window :],
                         ):
                             X.append(record.data[top_features].to_numpy())
-                            y.append(lag_record.data["responder_6_lag_1"].to_numpy())
+                            # y.append(lag_record.data["responder_6_lag_1"].to_numpy())
+                            y.append(lag_record.data["responder_6_smoothed"].to_numpy())
 
                         X = np.vstack(X)
                         y = np.concatenate(y)
@@ -184,23 +192,24 @@ class LinearRankedCorrelation(BaseModel):
                         X = X[mask]
                         y = y[mask]
 
-                        # Fit Lasso
-                        from sklearn.linear_model import LassoCV
+                        X, y = TruncateCalculator().truncate(X, y)
 
-                        # model = LassoCV(cv=5).fit(X, y)
+                        # Fit Lasso
+                        # model = Lasso(alpha=0.01, fit_intercept=False)
                         scaler = StandardScaler()
                         X_scaled = scaler.fit_transform(X)
-                        model = Lasso(alpha=0.05, fit_intercept=False).fit(X_scaled, y)
-                        # model = Lasso(
-                        #     alpha=0.1, fit_intercept=False
-                        # )  # CV(cv=5)  # self.fitting_model
-                        model.fit(X, y)
-                        print(model.coef_)
+                        # model = Lasso(alpha=0.10, fit_intercept=False).fit(X_scaled, y)
+                        model = LassoCV(
+                            n_alphas=100, cv=20, tol=0.01, fit_intercept=False
+                        )
+                        model.fit(X_scaled, y)
+                        print("alpha:", model.alpha_)
+                        print("coefficients:", model.coef_)
 
                         # Predict
                         curr_x = day_data[top_features].tail(1).to_numpy()
                         prediction = model.predict(curr_x)[0]
-                        original_feature = top_features[0].replace("_rolling_sign", "")
+                        # original_feature = top_features[0].replace("_rolling_sign", "")
 
                         # Calculate the rolling standard deviation of the original feature
                         # try:
