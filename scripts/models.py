@@ -13,6 +13,7 @@ from calculators import (
 from record import CorrelationCache, SymbolRecord
 from sklearn.linear_model import Lasso, LassoCV
 from sklearn.preprocessing import StandardScaler
+from utils import get_time_weights
 
 
 class BaseModel(ABC):
@@ -129,7 +130,7 @@ class LinearRankedCorrelation(BaseModel):
     ):
         estimates = []
         for symbol in symbol_ids:
-            if ttime < self.smoothing_period or ttime > 800:
+            if ttime < self.smoothing_period:  # or ttime > 800:
                 # if (symbol, tdate) in self.initial_estimate_record:
                 estimates.append(float(0))
                 # estimates.append(self.initial_estimate_record[(symbol, tdate)])
@@ -162,7 +163,7 @@ class LinearRankedCorrelation(BaseModel):
                         symbol,
                         available_features,
                         top_n=self.max_terms,
-                        threshold=0.15,
+                        threshold=0.20,
                         min_records=self.lt_window,
                     )
                     if top_features:
@@ -192,43 +193,30 @@ class LinearRankedCorrelation(BaseModel):
                         X = X[mask]
                         y = y[mask]
 
-                        X, y = TruncateCalculator().truncate(X, y)
+                        X, y = TruncateCalculator(
+                            lower_percentile=1.0, upper_percentile=99.0
+                        ).truncate(X, y)
 
                         # Fit Lasso
                         # model = Lasso(alpha=0.01, fit_intercept=False)
                         scaler = StandardScaler()
                         X_scaled = scaler.fit_transform(X)
-                        # model = Lasso(alpha=0.10, fit_intercept=False).fit(X_scaled, y)
+                        # model = Lasso(alpha=0.01, fit_intercept=False)
                         model = LassoCV(
-                            n_alphas=100, cv=20, tol=0.01, fit_intercept=False
+                            n_alphas=100, cv=20, tol=0.005, fit_intercept=False
                         )
-                        model.fit(X_scaled, y)
-                        print("alpha:", model.alpha_)
+                        model.fit(
+                            X_scaled, y, sample_weight=get_time_weights(len(y))[::-1]
+                        )
+                        # print("alpha:", model.alpha_)
                         print("coefficients:", model.coef_)
 
                         # Predict
                         curr_x = day_data[top_features].tail(1).to_numpy()
                         prediction = model.predict(curr_x)[0]
-                        # original_feature = top_features[0].replace("_rolling_sign", "")
 
-                        # Calculate the rolling standard deviation of the original feature
-                        # try:
-                        #     original_feature_data = day_data[
-                        #         original_feature
-                        #     ].to_numpy()
-                        #     rolling_std = np.std(
-                        #         lag_record.data["responder_6_lag_1"].to_numpy()
-                        #     ) / np.std(original_feature_data[-20:])
-                        #     if np.isnan(rolling_std):
-                        #         print(
-                        #             f"Rolling std is NaN for feature: {original_feature}"
-                        #         )
-                        #         adj = prediction
-                        #     else:
-                        #         adj = rolling_std * prediction
                         estimates.append(prediction)
-                        # except Exception:
-                        #     print("oops")
+
                 except KeyError:
                     print(
                         f"Symbol: {symbol} not found in cache for tdate, ttime: {tdate, ttime}. Filling with 0"

@@ -25,7 +25,9 @@ class SymbolRecord:
         return self.data[feature_column]  # .shift(-int(20/self.freq))
 
     def add_smoothed_response(self, period: int = 20):
-        mean_response = self.data["responder_6"].rolling_mean(period)
+        mean_response = (
+            self.data["responder_6_lag_1"].rolling_mean(period).shift(-period)
+        )
         self.data = self.data.with_columns(mean_response.alias("responder_6_smoothed"))
 
     def add_derived_features(self, period: int = 20):

@@ -12,6 +12,7 @@ import utils as utils
 from calculators import ExpWeightedMeanCalculator
 from cycler import cycler
 from data_preprocessing import Preprocessor
+from scipy.stats import spearmanr
 
 
 def apply_custom_style():
@@ -531,7 +532,7 @@ def plot_per_symbol_cum_error(
 def plot_feature_time_series(
     performance_path, start: int, end: int, symbol: int, period: int, features: list
 ):
-    plt.figure(figsize=(10, 6))
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))
 
     performance_df = pd.read_parquet(performance_path)
     performance_df = performance_df[
@@ -542,29 +543,51 @@ def plot_feature_time_series(
     symbol_df = symbol_df.reset_index(drop=True)
 
     for feature in features:
+        rolling_mean = (
+            symbol_df[feature].diff(period).rolling(period).mean()
+        )  # .rolling(period).mean()
 
-        rolling_mean = symbol_df[feature].rolling(20).mean()
-
-        plt.plot(
+        axes[0].plot(
             symbol_df.index,
-            # rolling_mean,
-            symbol_df[feature].shift(period),  # .apply(np.sign).rolling(period).mean(),
-            # * symbol_df["weight"].iloc[-1],
-            # * symbol_df[feature]
-            # .rolling(period)
-            # .std(),  # - feature.rolling(period).mean(),
-            # .rolling(5).mean(),
-            # rolling_sum,  # - symbol_df[feature].shift(20),  # .rolling(20).sum(),
+            rolling_mean,
             label=f"{feature}",
         )
 
-    plt.plot(symbol_df.index, symbol_df["responder_6"], label="responder_6")
+    axes[0].plot(
+        symbol_df.index,
+        symbol_df["responder_6"],  # .rolling(period).mean(),
+        label="responder_6",
+    )
 
-    plt.xlabel("Index")
-    plt.ylabel("Error")
-    plt.title(f"Symbol: {symbol} Feature Time Series")
-    plt.legend(loc="lower left")
-    plt.grid(True)
+    axes[0].set_xlabel("Index")
+    axes[0].set_ylabel("Value")
+    axes[0].set_title("Feature Time Series")
+    axes[0].legend(loc="upper left")
+    axes[0].grid(True)
+
+    # Compute rolling correlation using pandas
+    for feature in features:
+        rolling_corr = (
+            symbol_df[feature]
+            .rolling(period)
+            .corr(
+                symbol_df["responder_6"],  # .rolling(period).mean())
+            )
+        )  # .rolling(period).mean().shift(-20)
+
+        axes[1].plot(
+            symbol_df.index,
+            rolling_corr,
+            label=f"{feature} vs responder_6",
+        )
+
+    axes[1].set_xlabel("Index")
+    axes[1].set_ylabel("Correlation")
+    axes[1].set_title("Rolling Correlation")
+    axes[1].legend(loc="upper left")
+    axes[1].grid(True)
+
+    plt.tight_layout()
     plt.show()
 
 
@@ -1478,6 +1501,76 @@ def grid_search_sign_correlations(
                             "correlation": shifted_sign_corr,
                         }
                     )
+
+        # Sort by the absolute value of the correlation and select the top 30
+        top_features = sorted(
+            symbol_results, key=lambda x: abs(x["correlation"]), reverse=True
+        )[:30]
+
+        # Print the results
+        print(f"Symbol: {symbol}")
+        print(f"{'Feature':<30} | {'Correlation':<10}")
+        for result in top_features:
+            print(f"{result['feature']:<30} | {result['correlation']:<10.4f}")
+
+        results.extend(top_features)
+
+        if plot_matrix:
+            # Extract the top 20 features for the correlation matrix
+            top_20_features = [result["feature"] for result in top_features[:20]]
+            top_20_df = symbol_df[top_20_features]
+
+            # Plot the correlation matrix
+            plt.figure(figsize=(12, 10))
+            corr_matrix = top_20_df.corr(method="spearman")
+            sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", cbar=True)
+            plt.title(f"Correlation Matrix for Top 20 Features - Symbol {symbol}")
+            plt.tight_layout(pad=2.0)  # Adjust padding to create bigger margins
+            plt.show()
+
+    return pd.DataFrame(results)
+
+
+def grid_search_diff_cumsum_correlations(
+    performance_path, symbols, features, start, end, plot_matrix=False
+):
+    # Read the performance data from the Parquet file
+    performance_df = pd.read_parquet(performance_path)
+
+    results = []
+
+    for symbol in symbols:
+        # Filter the DataFrame for the given symbol
+        symbol_df = performance_df[performance_df["symbol_id"] == symbol]
+
+        # Filter the DataFrame for the given date range
+        symbol_df = symbol_df[
+            (symbol_df["date_id"] >= start) & (symbol_df["date_id"] <= end)
+        ]
+
+        symbol_results = []
+
+        for feature in features:
+            if feature in symbol_df.columns:
+                # Create the difference series
+                diff_series = symbol_df[feature].rolling(20).mean().apply(np.sign)
+                #     - symbol_df.groupby("date_id")[feature].transform("first")
+                # ) / symbol_df.groupby("date_id")[feature].transform("first")
+
+                # Calculate the cumulative sum of the difference series
+                # cumsum_series = diff_series.cumsum()
+
+                # Measure Spearman correlation with responder_6
+                spearman_corr, _ = spearmanr(
+                    diff_series,
+                    symbol_df["responder_6"].apply(np.sign),
+                    nan_policy="omit",  # .diff(20)
+                )
+
+                # Store the results
+                symbol_results.append(
+                    {"symbol": symbol, "feature": feature, "correlation": spearman_corr}
+                )
 
         # Sort by the absolute value of the correlation and select the top 30
         top_features = sorted(

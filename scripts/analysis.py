@@ -16,6 +16,7 @@ from plotting import (
     get_static_correlation_matrix,
     grid_search_correlations,
     grid_search_correlations_scaled,
+    grid_search_diff_cumsum_correlations,
     grid_search_differences,
     grid_search_feature_interactions,
     grid_search_rolling_sum,
@@ -108,7 +109,7 @@ if __name__ == "__main__":
     #     partition_ids=[0],
     #     sample_frequency=15,
     # ).read_partition()
-    plot_r2_time_series(model_paths, start, end)
+    # plot_r2_time_series(model_paths, start, end)
     # plot_per_symbol_r2(performance_paths, start, end)
     # plot_per_symbol_cum_error(
     #     performance_paths=performance_paths, start=start, s=e nd, symbols=symbols
@@ -117,9 +118,9 @@ if __name__ == "__main__":
     #     performance_paths[0],
     #     start,
     #     end,
-    #     12,
+    #     13,
     #     20,
-    #     ["feature_49"],  # ["feature_40" "feature_71", "feature_34", "feature_75"]
+    #     ["feature_52"],  # ["feature_40" "feature_71", "feature_34", "feature_75"]
     # )
     # plot_cross_feature_time_series(
     #     performance_paths[0], start, end, 1, "feature_63", "feature_38"
@@ -164,3 +165,6 @@ if __name__ == "__main__":
     #     performance_paths[0], symbols, features, start, end
     # )
     # grid_search_sign_correlations(performance_paths[0], symbols, features, start, end)
+    grid_search_diff_cumsum_correlations(
+        performance_paths[0], symbols, features, start, end
+    )

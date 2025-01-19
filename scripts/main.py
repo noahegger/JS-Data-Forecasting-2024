@@ -392,9 +392,9 @@ if __name__ == "__main__":
             alpha=1.0,
             fit_intercept=False,
         ),
-        max_terms=5,
-        lt_window=7,
-        st_window=7,
+        max_terms=3,
+        lt_window=3,
+        st_window=3,
         smoothing_period=20,
     )
     preprocessor = Preprocessor(
@@ -423,7 +423,7 @@ if __name__ == "__main__":
             dir=LOCAL_DATA_DIR,
             test_parquet=f"{LOCAL_DATA_DIR}/synthetic_test.parquet",
             lag_parquet=f"{LOCAL_DATA_DIR}/synthetic_lag.parquet",
-            cache_lb_days=10,
+            cache_lb_days=3,
             cache_freq=1,
             smoothing_period=20,
             test=True,  # Set to True for local testing
@@ -450,7 +450,7 @@ if __name__ == "__main__":
                 "feature_61",
                 "feature_29",
             },
-            synthetic_days=11,  # Pass synthetic_days parameter
+            synthetic_days=6,  # Pass synthetic_days parameter
         )
     elif KAGGLE_TEST:
         predictor = Predictor(
