@@ -47,6 +47,7 @@ class Predictor:
         lag_parquet: Optional[str] = None,
         cache_lb_days: int = 5,
         cache_freq: int = 1,
+        smoothing_period: int = 20,
         test: bool = False,
         partition_ids: Optional[List[int]] = None,
         exclude_set: Optional[set] = None,
@@ -61,10 +62,17 @@ class Predictor:
         self.lag_parquet = str(lag_parquet) if lag_parquet else ""
         self.cache_lb_days = cache_lb_days
         self.cache_freq = cache_freq
+        self.smoothing_period = smoothing_period
         self.cache_history = Cache(
-            maxlen=self.cache_lb_days + 1, freq=self.cache_freq
+            maxlen=self.cache_lb_days + 1,
+            smoothing_period=self.smoothing_period,
+            freq=self.cache_freq,
         )  # needed for alignment of resp, feature since lag offset by 1
-        self.lag_cache = Cache(maxlen=self.cache_lb_days, freq=self.cache_freq)
+        self.lag_cache = Cache(
+            maxlen=self.cache_lb_days,
+            smoothing_period=self.smoothing_period,
+            freq=self.cache_freq,
+        )
         self.corr_cache = CorrelationCache(maxlen=self.cache_lb_days)
         self.test_ = None
         self.time_step_count = 0
@@ -282,10 +290,11 @@ class Predictor:
 
                 batch_data = batch.select(META_COLS + lag_responder_cols)
                 date_id = batch["date_id"][0]
-                self.lag_cache.update(symbol_id, date_id, batch_data, is_lag_cache=True)  # type: ignore
-                self.corr_cache.update(
-                    symbol_id, date_id, self.lag_cache.cache, self.cache_history.cache  # type: ignore
-                )
+                if date_id != 0:  # initialization covered date_id = 0
+                    self.lag_cache.update(symbol_id, date_id, batch_data, is_lag_cache=True)  # type: ignore
+                    self.corr_cache.update(
+                        symbol_id, date_id, self.cache_history.cache, self.lag_cache.cache  # type: ignore
+                    )
                 # update correlation cache
 
         self.test_ = test
@@ -309,19 +318,18 @@ class Predictor:
                 tdate = test["date_id"][-1]
                 ttime = batch["time_id"][-1]
                 # Pass the cache history to the prediction model
-                print(ttime)
 
                 try:
                     estimates = self.model.get_estimates(
                         symbol_ids=symbol_ids,
                         cache_history=self.cache_history.cache,
                         lag_cache=self.lag_cache.cache,
-                        corr_cache=self.corr_cache.cache,
+                        corr_cache=self.corr_cache,
                         tdate=tdate,
                         ttime=ttime,
                     )
 
-                    print(estimates)
+                    # print("Estimates:", estimates)
                 except Exception as e:
                     print(f"Error: {e}")
 
@@ -329,14 +337,15 @@ class Predictor:
                     {
                         "row_id": row_ids,
                         "responder_6": estimates,
-                    }
+                    },
+                    strict=False,
                 )
             except Exception as e:
                 print(f"Error: {e}")
 
         else:
             predictions = pl.DataFrame(
-                {"row_id": test["row_id"], "responder_6": [0] * len(test)}
+                {"row_id": test["row_id"], "responder_6": [float(0)] * len(test)}
             )
         assert isinstance(predictions, pl.DataFrame | pd.DataFrame)
         assert list(predictions.columns) == ["row_id", "responder_6"]
@@ -383,9 +392,9 @@ if __name__ == "__main__":
             alpha=1.0,
             fit_intercept=False,
         ),
-        max_terms=10,
-        lt_window=5,
-        st_window=5,
+        max_terms=3,
+        lt_window=3,
+        st_window=3,
         smoothing_period=20,
     )
     preprocessor = Preprocessor(
@@ -414,10 +423,11 @@ if __name__ == "__main__":
             dir=LOCAL_DATA_DIR,
             test_parquet=f"{LOCAL_DATA_DIR}/synthetic_test.parquet",
             lag_parquet=f"{LOCAL_DATA_DIR}/synthetic_lag.parquet",
-            cache_lb_days=5,
+            cache_lb_days=3,
             cache_freq=1,
+            smoothing_period=20,
             test=True,  # Set to True for local testing
-            partition_ids=[8],  # Specify partition IDs for synthetic data
+            partition_ids=[0],  # Specify partition IDs for synthetic data
             exclude_set={
                 "feature_00",
                 "feature_01",
