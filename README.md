@@ -8,9 +8,8 @@ Jane Street's competition involved predicting real-world financial market data, 
 
 The goal was to predict `responder_6`, assessed through a weighted zero-mean R-squared scoring metric:
 
-$
-R^2 = 1 - \frac{\sum_i w_i (y_i - \hat{y}_i)^2}{\sum_i w_i y_i^2}
-$
+$R^2 = 1 - \frac{\sum_i w_i (y_i - \hat{y}_i)^2}{\sum_i w_i y_i^2}$
+
 where $y_i$ and $\hat{y}_i$ are the actual and predicted values, and $w_i$ are sample weights.
 
 ## Repository Structure
